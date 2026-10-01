@@ -1,7 +1,6 @@
 package ru.jarvis.assistant
 
 import android.Manifest
-import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -24,7 +23,7 @@ import java.util.Locale
  * Мгновенные команды: выполняются на телефоне сразу, без нейросети и без интернета.
  * handle() возвращает ответ для озвучки или null, если команда не распознана.
  */
-class Commands(private val activity: Activity) {
+class Commands(private val activity: Context) {
 
     data class Reply(val text: String, val listenAfter: Boolean = true)
 

@@ -42,6 +42,23 @@ jobs:
           cp -r "$d/espeak-ng-data" app/src/main/assets/ruslan/
           du -sh app/src/main/assets/ruslan
 
+      - name: Детектор слова «Джарвис»
+        run: |
+          set -e
+          mkdir -p app/src/main/assets/wakeword
+          curl -fsSL -o kws.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2"
+          tar xjf kws.tar.bz2
+          k=sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01
+          ls -la "$k"
+          cp "$k/encoder-epoch-12-avg-2-chunk-16-left-64.onnx" app/src/main/assets/wakeword/encoder.onnx
+          cp "$k/decoder-epoch-12-avg-2-chunk-16-left-64.onnx" app/src/main/assets/wakeword/decoder.onnx
+          cp "$k/joiner-epoch-12-avg-2-chunk-16-left-64.onnx" app/src/main/assets/wakeword/joiner.onnx
+          cp "$k/tokens.txt" app/src/main/assets/wakeword/tokens.txt
+          pip install -q sherpa-onnx sentencepiece
+          printf 'JARVIS :2.0 #0.15 @JARVIS\nJERVIS :2.0 #0.15 @JARVIS\nJARVES :2.0 #0.15 @JARVIS\nHEY JARVIS :2.0 #0.2 @JARVIS\n' > keywords_raw.txt
+          sherpa-onnx-cli text2token --tokens "$k/tokens.txt" --tokens-type bpe --bpe-model "$k/bpe.model" keywords_raw.txt app/src/main/assets/wakeword/keywords.txt
+          cat app/src/main/assets/wakeword/keywords.txt
+
       - name: Сборка
         run: gradle assembleDebug --no-daemon --stacktrace
 

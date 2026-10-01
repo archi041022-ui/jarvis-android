@@ -8,5 +8,6 @@ object JarvisPrefs {
     const val KEY_API = "api_key"
     const val KEY_PITCH = "voice_pitch"
     const val KEY_RATE = "voice_rate"
+    const val KEY_ALWAYS = "always_listen"
     const val DEFAULT_MODEL = "qwen2.5:3b"
 }

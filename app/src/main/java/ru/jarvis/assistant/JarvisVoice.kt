@@ -28,8 +28,8 @@ class JarvisVoice(private val context: Context) {
     private var tts: OfflineTts? = null
 
     /** Подготовка голоса. Вызывать в фоновом потоке: при первом запуске копирует ~25 МБ. */
-    fun init(): Boolean {
-        return try {
+    fun init(): Boolean = synchronized(LOCK) {
+        try {
             val dir = File(context.filesDir, VOICE_DIR)
             val marker = File(dir, ".ready-$DATA_VERSION")
             if (!marker.exists()) {
@@ -160,5 +160,6 @@ class JarvisVoice(private val context: Context) {
     companion object {
         private const val VOICE_DIR = "ruslan"
         private const val DATA_VERSION = 1
+        private val LOCK = Any()
     }
 }

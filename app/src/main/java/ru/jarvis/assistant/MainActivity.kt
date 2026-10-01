@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -44,6 +45,7 @@ class MainActivity : Activity() {
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private lateinit var voice: JarvisVoice
+    private lateinit var alwaysButton: Button
     @Volatile private var speechId = 0L
     private var listening = false
     private var thinking = false
@@ -72,7 +74,12 @@ class MainActivity : Activity() {
             }
         }.start()
         askPermissions()
+        if (prefs().getBoolean(JarvisPrefs.KEY_ALWAYS, false) && hasMic()) {
+            JarvisService.start(this, paused = true)
+        }
     }
+
+    private fun prefs() = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -80,9 +87,16 @@ class MainActivity : Activity() {
         if (ttsReady) startListening()
     }
 
+    override fun onResume() {
+        super.onResume()
+        JarvisService.send(this, JarvisService.ACTION_PAUSE)   // пока приложение на экране, слушает оно само
+        updateAlwaysButton()
+    }
+
     override fun onPause() {
         super.onPause()
         stopListening()
+        JarvisService.send(this, JarvisService.ACTION_RESUME)
     }
 
     override fun onDestroy() {
@@ -147,6 +161,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(18), 0, dp(12))
         }
 
+        alwaysButton = makeButton("Слушать всегда: выкл") { toggleAlways() }
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         buttons.addView(makeButton("Настройки") { showSettings() }, LinearLayout.LayoutParams(0, dp(48), 1f))
         buttons.addView(View(this), LinearLayout.LayoutParams(dp(10), 1))
@@ -156,6 +171,7 @@ class MainActivity : Activity() {
         root.addView(statusView)
         root.addView(orbBox)
         root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(alwaysButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)).apply { bottomMargin = dp(10) })
         root.addView(buttons)
         setContentView(root)
     }
@@ -463,6 +479,56 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Отмена", null)
             .show()
+    }
+
+    // ───────────── Постоянное прослушивание ─────────────
+
+    private fun updateAlwaysButton() {
+        if (::alwaysButton.isInitialized) {
+            alwaysButton.text = if (JarvisService.running) "Слушать всегда: ВКЛ (скажите «Джарвис»)" else "Слушать всегда: выкл"
+        }
+    }
+
+    private fun toggleAlways() {
+        if (JarvisService.running) {
+            prefs().edit().putBoolean(JarvisPrefs.KEY_ALWAYS, false).apply()
+            JarvisService.stop(this)
+            main.postDelayed({ updateAlwaysButton() }, 300)
+            return
+        }
+        if (!hasMic()) { askPermissions(); return }
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("Ещё одно разрешение")
+                .setMessage("Чтобы Джарвис мог открывать приложения по голосу, когда вы в другом приложении, " +
+                    "включите для него «Поверх других приложений». Затем вернитесь и нажмите кнопку ещё раз.")
+                .setPositiveButton("Открыть") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                }
+                .setNegativeButton("Пропустить") { _, _ -> enableAlways() }
+                .show()
+            return
+        }
+        enableAlways()
+    }
+
+    private fun enableAlways() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                @Suppress("BatteryLife")
+                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+            } catch (_: Exception) {
+            }
+        }
+        prefs().edit().putBoolean(JarvisPrefs.KEY_ALWAYS, true).apply()
+        JarvisService.start(this, paused = true)
+        main.postDelayed({ updateAlwaysButton() }, 500)
+        Toast.makeText(this, "Готово. Сверните приложение и скажите «Джарвис»", Toast.LENGTH_LONG).show()
     }
 
     private fun openAccessibility() {
