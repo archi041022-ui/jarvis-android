@@ -23,6 +23,25 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
+      - name: Голос Джарвиса и библиотека синтеза речи
+        run: |
+          set -e
+          mkdir -p app/libs app/src/main/assets/ruslan
+          for v in 1.13.8 1.13.7 1.13.6 1.13.5 1.13.4 1.13.3 1.13.2 1.13.1 1.13.0 1.12.15 1.12.14 1.12.13; do
+            if curl -fsSL -o app/libs/sherpa-onnx.aar "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$v/sherpa-onnx-$v.aar"; then
+              echo "sherpa-onnx $v"; break
+            fi
+          done
+          test -s app/libs/sherpa-onnx.aar
+          curl -fsSL -o voice.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ru_RU-ruslan-medium-int8.tar.bz2"
+          tar xjf voice.tar.bz2
+          d=vits-piper-ru_RU-ruslan-medium-int8
+          ls -la "$d"
+          cp "$(ls "$d"/*.onnx | head -n 1)" app/src/main/assets/ruslan/model.onnx
+          cp "$d/tokens.txt" app/src/main/assets/ruslan/tokens.txt
+          cp -r "$d/espeak-ng-data" app/src/main/assets/ruslan/
+          du -sh app/src/main/assets/ruslan
+
       - name: Сборка
         run: gradle assembleDebug --no-daemon --stacktrace
 

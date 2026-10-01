@@ -43,6 +43,8 @@ class MainActivity : Activity() {
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    private lateinit var voice: JarvisVoice
+    @Volatile private var speechId = 0L
     private var listening = false
     private var thinking = false
     private var listenAfterSpeech = false
@@ -62,6 +64,13 @@ class MainActivity : Activity() {
         commands = Commands(this)
         buildUi()
         initTts()
+        voice = JarvisVoice(this)
+        Thread {
+            val ok = voice.init()
+            main.post {
+                if (!ok) Toast.makeText(this, "Голос Джарвиса недоступен, использую голос Android", Toast.LENGTH_LONG).show()
+            }
+        }.start()
         askPermissions()
     }
 
@@ -79,6 +88,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         recognizer?.destroy()
         tts?.shutdown()
+        voice.release()
         super.onDestroy()
     }
 
@@ -235,6 +245,24 @@ class MainActivity : Activity() {
         listenAfterSpeech = listenAfter
         setOrb("ГОВОРЮ", false)
         statusView.text = "Отвечаю"
+        val id = ++speechId
+        val clean = text.replace(Regex("[\\[\\]{}<>*_#]"), " ")
+        if (voice.ready) {
+            val speed = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE).getFloat(JarvisPrefs.KEY_RATE, 1.0f)
+            Thread {
+                val ok = voice.speakBlocking(clean, speed, aiEffect = true)
+                main.post {
+                    if (id != speechId) return@post          // фразу прервали новой командой
+                    if (ok) afterSpeech() else speakAndroid(clean)
+                }
+            }.start()
+        } else {
+            speakAndroid(clean)
+        }
+    }
+
+    /** Запасной голос — встроенный синтезатор Android. */
+    private fun speakAndroid(text: String) {
         val engine = tts
         if (!ttsReady || engine == null) {
             afterSpeech()
@@ -265,6 +293,8 @@ class MainActivity : Activity() {
             return
         }
         tts?.stop()
+        speechId++
+        voice.stop()
         recognizer?.destroy()
         recognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(listener)

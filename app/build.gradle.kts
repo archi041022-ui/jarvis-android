@@ -11,8 +11,13 @@ android {
         applicationId = "ru.jarvis.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+
+        ndk {
+            // Только 64-битные ARM-процессоры (Samsung A37 и все современные телефоны) — APK меньше
+            abiFilters += "arm64-v8a"
+        }
     }
 
     // Постоянный ключ подписи: обновления ставятся поверх старой версии без удаления
@@ -42,4 +47,9 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+dependencies {
+    // Офлайн-синтез речи sherpa-onnx (голос Piper «Руслан»). Файл скачивается при сборке на GitHub.
+    implementation(files("libs/sherpa-onnx.aar"))
 }
