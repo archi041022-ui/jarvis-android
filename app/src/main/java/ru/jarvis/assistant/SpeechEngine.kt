@@ -71,44 +71,66 @@ class SpeechEngine(private val context: Context, private val onPhrase: (String) 
         if (running) return
         running = true
         worker = Thread {
-            val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            val record = try {
-                AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, SAMPLE_RATE)
-                )
-            } catch (e: Throwable) {
-                running = false
-                return@Thread
-            }
-            if (record.state != AudioRecord.STATE_INITIALIZED) {
-                record.release(); running = false; return@Thread
-            }
-            val stream = rec.createStream()
-            val buffer = ShortArray(SAMPLE_RATE / 10)          // 100 мс
-            try {
-                record.startRecording()
-                while (running) {
-                    val n = record.read(buffer, 0, buffer.size)
-                    if (n <= 0) continue
-                    val samples = FloatArray(n) { buffer[it] / 32768f }
-                    stream.acceptWaveform(samples, SAMPLE_RATE)
-                    while (rec.isReady(stream)) rec.decode(stream)
-                    if (rec.isEndpoint(stream)) {
-                        val text = rec.getResult(stream).text.trim()
-                        rec.reset(stream)
-                        if (text.isNotEmpty() && running) onPhrase(text)
-                    }
-                }
-            } catch (e: Throwable) {
-                running = false
-            } finally {
-                try { record.stop() } catch (_: Throwable) {}
-                record.release()
-                stream.release()
+            // Микрофон может быть временно занят (только что закрылось окно приложения,
+            // звонок, голосовой ввод клавиатуры) — тогда не сдаёмся, а пробуем снова.
+            while (running) {
+                captureOnce(rec)
+                if (running) try { Thread.sleep(1000) } catch (_: InterruptedException) {}
             }
         }.apply { name = "jarvis-asr"; start() }
     }
+
+    /** Одна сессия записи. Возвращается при ошибке микрофона или остановке. */
+    @SuppressLint("MissingPermission")
+    private fun captureOnce(rec: OnlineRecognizer) {
+        val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val record = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, SAMPLE_RATE)
+            )
+        } catch (e: Throwable) {
+            return
+        }
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release(); return
+        }
+        val stream = rec.createStream()
+        val buffer = ShortArray(SAMPLE_RATE / 10)          // 100 мс
+        var errors = 0
+        try {
+            record.startRecording()
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) return
+            lastAudio = System.currentTimeMillis()
+            while (running) {
+                val n = record.read(buffer, 0, buffer.size)
+                if (n <= 0) {
+                    if (++errors > 20) return              // микрофон отобрали — переподключимся
+                    Thread.sleep(50); continue
+                }
+                errors = 0
+                lastAudio = System.currentTimeMillis()
+                val samples = FloatArray(n) { buffer[it] / 32768f }
+                stream.acceptWaveform(samples, SAMPLE_RATE)
+                while (rec.isReady(stream)) rec.decode(stream)
+                if (rec.isEndpoint(stream)) {
+                    val text = rec.getResult(stream).text.trim()
+                    rec.reset(stream)
+                    if (text.isNotEmpty() && running) onPhrase(text)
+                }
+            }
+        } catch (e: Throwable) {
+            // упадём в повтор
+        } finally {
+            try { record.stop() } catch (_: Throwable) {}
+            record.release()
+            stream.release()
+        }
+    }
+
+    /** Время последнего полученного от микрофона звука — для сторожа в службе. */
+    @Volatile var lastAudio = 0L
+        private set
 
     /** Останавливает прослушивание и освобождает микрофон. */
     @Synchronized

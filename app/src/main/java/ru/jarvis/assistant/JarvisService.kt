@@ -17,6 +17,7 @@ import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
+import java.util.concurrent.Executors
 
 /**
  * Постоянно работающий Джарвис: слушает слово «Джарвис» без нажатий,
@@ -37,6 +38,15 @@ class JarvisService : Service() {
     private var busy = false              // идёт обработка команды или ответ
     private var awaitUntil = 0L           // до этого момента ждём команду без слова «Джарвис»
     private var followUps = 0
+    private var busySince = 0L
+    // Все включения/выключения микрофона — строго по очереди, чтобы «выключить» не обогнало «включить»
+    private val micQueue = Executors.newSingleThreadExecutor()
+    private val watchdog = object : Runnable {
+        override fun run() {
+            checkHealth()
+            main.postDelayed(this, 5000)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -62,6 +72,7 @@ class JarvisService : Service() {
                 ready = okEars
                 if (!okEars) updateNotification("Не удалось запустить распознавание речи")
                 else listen()
+                main.postDelayed(watchdog, 5000)
             }
         }.start()
     }
@@ -75,7 +86,7 @@ class JarvisService : Service() {
             }
             ACTION_PAUSE -> {
                 paused = true
-                if (::ears.isInitialized) ears.stop()
+                if (::ears.isInitialized) micQueue.execute { ears.stop() }
                 updateNotification("Пауза: приложение открыто")
             }
             ACTION_RESUME -> {
@@ -88,6 +99,8 @@ class JarvisService : Service() {
 
     override fun onDestroy() {
         running = false
+        main.removeCallbacks(watchdog)
+        micQueue.shutdownNow()
         ears.release()
         voice.release()
         tts?.shutdown()
@@ -101,7 +114,23 @@ class JarvisService : Service() {
         if (!ready || paused) return
         busy = false
         updateNotification(if (System.currentTimeMillis() < awaitUntil) "Слушаю, Сэр…" else "Скажите «Джарвис»")
-        Thread { ears.start() }.start()
+        micQueue.execute { ears.start() }
+    }
+
+    /**
+     * Сторож: раз в 5 секунд проверяет, что Джарвис действительно слушает.
+     * Если микрофон «отвалился» или ответ завис — перезапускает слух.
+     */
+    private fun checkHealth() {
+        if (!ready || paused) return
+        val now = System.currentTimeMillis()
+        if (busy) {
+            if (now - busySince > 60_000) { voice.stop(); tts?.stop(); awaitUntil = 0; listen() }
+            return
+        }
+        val silentTooLong = ears.lastAudio != 0L && now - ears.lastAudio > 8000
+        if (!ears.isRunning) listen()
+        else if (silentTooLong) micQueue.execute { ears.stop(); ears.start() }
     }
 
     /** Каждая законченная фраза: ищем обращение «Джарвис» или ждём команду после сигнала. */
@@ -124,8 +153,9 @@ class JarvisService : Service() {
 
     private fun handle(text: String) {
         busy = true
+        busySince = System.currentTimeMillis()
         awaitUntil = 0
-        Thread { ears.stop() }.start()                      // не слушаем, пока думаем и говорим
+        micQueue.execute { ears.stop() }                     // не слушаем, пока думаем и говорим
         process(text)
     }
 
@@ -183,7 +213,7 @@ class JarvisService : Service() {
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) { main.post { onDone() } }
         })
-        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.nanoTime())
+        if (engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.nanoTime()) != TextToSpeech.SUCCESS) onDone()
     }
 
     private fun beep() {
