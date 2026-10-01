@@ -54,9 +54,16 @@ jobs:
           cp "$k/decoder-epoch-12-avg-2-chunk-16-left-64.onnx" app/src/main/assets/wakeword/decoder.onnx
           cp "$k/joiner-epoch-12-avg-2-chunk-16-left-64.onnx" app/src/main/assets/wakeword/joiner.onnx
           cp "$k/tokens.txt" app/src/main/assets/wakeword/tokens.txt
-          pip install -q sherpa-onnx sentencepiece
-          printf 'JARVIS :2.0 #0.15 @JARVIS\nJERVIS :2.0 #0.15 @JARVIS\nJARVES :2.0 #0.15 @JARVIS\nHEY JARVIS :2.0 #0.2 @JARVIS\n' > keywords_raw.txt
-          sherpa-onnx-cli text2token --tokens "$k/tokens.txt" --tokens-type bpe --bpe-model "$k/bpe.model" keywords_raw.txt app/src/main/assets/wakeword/keywords.txt
+          python3 -m venv /tmp/kwsenv
+          /tmp/kwsenv/bin/pip install -q sentencepiece
+          /tmp/kwsenv/bin/python - "$k/bpe.model" app/src/main/assets/wakeword/keywords.txt <<'PY'
+          import sys, sentencepiece as spm
+          sp = spm.SentencePieceProcessor(model_file=sys.argv[1])
+          words = [("JARVIS", ":2.0 #0.15"), ("JERVIS", ":2.0 #0.15"), ("JARVES", ":2.0 #0.15"), ("HEY JARVIS", ":2.0 #0.2")]
+          with open(sys.argv[2], "w", encoding="utf-8") as f:
+              for text, extra in words:
+                  f.write(" ".join(sp.encode(text, out_type=str)) + f" {extra} @JARVIS\n")
+          PY
           cat app/src/main/assets/wakeword/keywords.txt
 
       - name: Сборка
