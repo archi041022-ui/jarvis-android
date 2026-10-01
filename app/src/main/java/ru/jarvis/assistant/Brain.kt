@@ -25,7 +25,7 @@ class Brain(context: Context) {
         val model = prefs.getString(JarvisPrefs.KEY_MODEL, JarvisPrefs.DEFAULT_MODEL)?.trim() ?: JarvisPrefs.DEFAULT_MODEL
         val key = prefs.getString(JarvisPrefs.KEY_API, "")?.trim() ?: ""
         if (base.isEmpty()) {
-            return "Сэр, адрес нейросети не указан. Нажмите «Настройки» и впишите адрес ноутбука."
+            return "Сэр, нейросеть не настроена. Откройте «Настройки» и выберите сервис."
         }
 
         val stamp = SimpleDateFormat("dd.MM.yyyy HH:mm, EEEE", Locale.forLanguageTag("ru-RU")).format(Date())
@@ -58,7 +58,13 @@ class Brain(context: Context) {
             conn.disconnect()
             if (code !in 200..299) {
                 history.removeAt(history.lastIndex)
-                return "Сервер нейросети ответил ошибкой $code, Сэр."
+                return when (code) {
+                    401, 403 -> "Ключ доступа к нейросети не подошёл, Сэр. Проверьте его в настройках."
+                    402 -> "На счёте сервиса нейросети закончились средства, Сэр."
+                    404 -> "Сервис не знает такую модель, Сэр. Проверьте название модели в настройках."
+                    429 -> "Слишком много запросов к нейросети, Сэр. Попробуйте через минуту."
+                    else -> "Сервер нейросети ответил ошибкой $code, Сэр."
+                }
             }
             val content = JSONObject(response)
                 .getJSONArray("choices").getJSONObject(0)
@@ -70,7 +76,8 @@ class Brain(context: Context) {
             "Нейросеть думает слишком долго, Сэр. Попробуйте ещё раз."
         } catch (e: Exception) {
             if (history.isNotEmpty()) history.removeAt(history.lastIndex)
-            "Не могу связаться с ноутбуком, Сэр. Проверьте, что он включён и подключён к той же сети Wi-Fi."
+            if (base.contains(":11434")) "Не могу связаться с ноутбуком, Сэр. Проверьте, что он включён и в той же сети Wi-Fi."
+            else "Нет связи с нейросетью, Сэр. Проверьте интернет."
         }
     }
 

@@ -252,7 +252,7 @@ class MainActivity : Activity() {
         val firstRun = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE)
             .getString(JarvisPrefs.KEY_URL, "").isNullOrBlank()
         say(
-            if (firstRun) "Джарвис на связи, Сэр. Для свободного разговора укажите адрес ноутбука в настройках. Команды телефона доступны уже сейчас."
+            if (firstRun) "Джарвис на связи, Сэр. Для свободного разговора выберите нейросеть в настройках. Команды телефона доступны уже сейчас."
             else "Слушаю, Сэр.",
             listenAfter = true
         )
@@ -443,10 +443,23 @@ class MainActivity : Activity() {
             this.text = text; textSize = 12f; setPadding(0, dp(10), 0, 0)
         })
 
-        label("Адрес нейросети (ноутбук с Ollama)")
-        val url = field("http://192.168.1.10:11434/v1", prefs.getString(JarvisPrefs.KEY_URL, "") ?: "")
+        label("Где думает Джарвис — выберите вариант:")
+        val presets = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        box.addView(android.widget.HorizontalScrollView(this).apply { addView(presets) })
+        label("Адрес нейросети")
+        val url = field("https://api.deepseek.com/v1", prefs.getString(JarvisPrefs.KEY_URL, "") ?: "")
         label("Модель")
         val model = field(JarvisPrefs.DEFAULT_MODEL, prefs.getString(JarvisPrefs.KEY_MODEL, JarvisPrefs.DEFAULT_MODEL) ?: "")
+        fun preset(title: String, address: String, modelName: String) {
+            presets.addView(Button(this).apply {
+                text = title; isAllCaps = false; textSize = 12f
+                setOnClickListener { url.setText(address); model.setText(modelName) }
+            })
+        }
+        preset("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat")
+        preset("OpenRouter", "https://openrouter.ai/api/v1", "deepseek/deepseek-chat")
+        preset("Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile")
+        preset("Ноутбук", "http://192.168.0.157:11434/v1", JarvisPrefs.DEFAULT_MODEL)
         label("Ключ доступа (только для облачных сервисов, иначе пусто)")
         val key = field("необязательно", prefs.getString(JarvisPrefs.KEY_API, "") ?: "", password = true)
         label("Тембр голоса (0.5 — низкий, 1.0 — обычный)")

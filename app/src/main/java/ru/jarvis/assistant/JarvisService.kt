@@ -223,8 +223,13 @@ class JarvisService : Service() {
     private fun buildNotification(text: String): Notification {
         val manager = getSystemService(NotificationManager::class.java)!!
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager.getNotificationChannel(CHANNEL) == null) {
+            manager.deleteNotificationChannel("jarvis_listening")     // старый, заметный канал
+            // Минимальная важность: без значка в строке состояния, без звука, свёрнуто внизу шторки
             manager.createNotificationChannel(
-                NotificationChannel(CHANNEL, "Джарвис слушает", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(CHANNEL, "Джарвис в фоне", NotificationManager.IMPORTANCE_MIN).apply {
+                    setShowBadge(false)
+                    lockscreenVisibility = Notification.VISIBILITY_SECRET
+                }
             )
         }
         val open = PendingIntent.getActivity(
@@ -237,13 +242,16 @@ class JarvisService : Service() {
         )
         @Suppress("DEPRECATION")
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHANNEL)
-        else Notification.Builder(this)
+        else Notification.Builder(this).setPriority(Notification.PRIORITY_MIN)
         return builder
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("Джарвис")
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
+            .setVisibility(Notification.VISIBILITY_SECRET)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setShowWhen(false)
             .addAction(Notification.Action.Builder(null, "Выключить", stop).build())
             .build()
     }
@@ -265,7 +273,7 @@ class JarvisService : Service() {
         const val ACTION_STOP = "ru.jarvis.assistant.STOP"
         const val ACTION_PAUSE = "ru.jarvis.assistant.PAUSE"
         const val ACTION_RESUME = "ru.jarvis.assistant.RESUME"
-        private const val CHANNEL = "jarvis_listening"
+        private const val CHANNEL = "jarvis_quiet"
         private const val NOTIFICATION_ID = 7
 
         @Volatile
