@@ -42,29 +42,19 @@ jobs:
           cp -r "$d/espeak-ng-data" app/src/main/assets/ruslan/
           du -sh app/src/main/assets/ruslan
 
-      - name: Детектор слова «Джарвис»
+      - name: Офлайн-распознавание русской речи
         run: |
           set -e
-          mkdir -p app/src/main/assets/wakeword
-          curl -fsSL -o kws.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2"
-          tar xjf kws.tar.bz2
-          k=sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01
-          ls -la "$k"
-          cp "$k/encoder-epoch-12-avg-2-chunk-16-left-64.onnx" app/src/main/assets/wakeword/encoder.onnx
-          cp "$k/decoder-epoch-12-avg-2-chunk-16-left-64.onnx" app/src/main/assets/wakeword/decoder.onnx
-          cp "$k/joiner-epoch-12-avg-2-chunk-16-left-64.onnx" app/src/main/assets/wakeword/joiner.onnx
-          cp "$k/tokens.txt" app/src/main/assets/wakeword/tokens.txt
-          python3 -m venv /tmp/kwsenv
-          /tmp/kwsenv/bin/pip install -q sentencepiece
-          /tmp/kwsenv/bin/python - "$k/bpe.model" app/src/main/assets/wakeword/keywords.txt <<'PY'
-          import sys, sentencepiece as spm
-          sp = spm.SentencePieceProcessor(model_file=sys.argv[1])
-          words = [("JARVIS", ":2.0 #0.15"), ("JERVIS", ":2.0 #0.15"), ("JARVES", ":2.0 #0.15"), ("HEY JARVIS", ":2.0 #0.2")]
-          with open(sys.argv[2], "w", encoding="utf-8") as f:
-              for text, extra in words:
-                  f.write(" ".join(sp.encode(text, out_type=str)) + f" {extra} @JARVIS\n")
-          PY
-          cat app/src/main/assets/wakeword/keywords.txt
+          mkdir -p app/src/main/assets/asr
+          curl -fsSL -o asr.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-small-ru-vosk-int8-2025-08-16.tar.bz2"
+          tar xjf asr.tar.bz2
+          a=sherpa-onnx-streaming-zipformer-small-ru-vosk-int8-2025-08-16
+          ls -la "$a"
+          cp "$a/encoder.int8.onnx" app/src/main/assets/asr/encoder.onnx
+          cp "$a/decoder.onnx" app/src/main/assets/asr/decoder.onnx
+          cp "$a/joiner.int8.onnx" app/src/main/assets/asr/joiner.onnx
+          cp "$a/tokens.txt" app/src/main/assets/asr/tokens.txt
+          du -sh app/src/main/assets/asr
 
       - name: Сборка
         run: gradle assembleDebug --no-daemon --stacktrace

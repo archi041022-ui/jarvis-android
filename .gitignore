@@ -7,3 +7,4 @@ local.properties
 /app/libs/
 /app/src/main/assets/ruslan/
 /app/src/main/assets/wakeword/
+/app/src/main/assets/asr/

@@ -11,8 +11,8 @@ android {
         applicationId = "ru.jarvis.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.3"
+        versionCode = 6
+        versionName = "1.4"
 
         ndk {
             // Только 64-битные ARM-процессоры (Samsung A37 и все современные телефоны) — APK меньше

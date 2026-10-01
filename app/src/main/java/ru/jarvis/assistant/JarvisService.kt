@@ -11,13 +11,9 @@ import android.content.pm.ServiceInfo
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
@@ -30,16 +26,16 @@ import java.util.Locale
 class JarvisService : Service() {
 
     private val main = Handler(Looper.getMainLooper())
-    private lateinit var wake: WakeWord
+    private lateinit var ears: SpeechEngine
     private lateinit var voice: JarvisVoice
     private lateinit var commands: Commands
     private lateinit var brain: Brain
     private var tts: TextToSpeech? = null
     private var ttsReady = false
-    private var recognizer: SpeechRecognizer? = null
     private var ready = false
-    private var paused = false        // приложение открыто на экране — микрофоном занимается оно
-    private var busy = false          // идёт диалог: команда, размышление или ответ
+    private var paused = false            // приложение открыто на экране — микрофоном занимается оно
+    private var busy = false              // идёт обработка команды или ответ
+    private var awaitUntil = 0L           // до этого момента ждём команду без слова «Джарвис»
     private var followUps = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -47,8 +43,8 @@ class JarvisService : Service() {
     override fun onCreate() {
         super.onCreate()
         running = true
-        startAsForeground("Скажите «Джарвис»")
-        wake = WakeWord(this) { main.post { onWake() } }
+        startAsForeground("Джарвис готовится…")
+        ears = SpeechEngine(this) { phrase -> main.post { onPhrase(phrase) } }
         voice = JarvisVoice(this)
         commands = Commands(this)
         brain = Brain(this)
@@ -60,15 +56,12 @@ class JarvisService : Service() {
             }
         }
         Thread {
-            val okWake = wake.init()
+            val okEars = ears.init()
             voice.init()
             main.post {
-                ready = okWake
-                if (!okWake) {
-                    updateNotification("Не удалось запустить распознавание слова «Джарвис»")
-                } else {
-                    resumeHotword()
-                }
+                ready = okEars
+                if (!okEars) updateNotification("Не удалось запустить распознавание речи")
+                else listen()
             }
         }.start()
     }
@@ -82,12 +75,12 @@ class JarvisService : Service() {
             }
             ACTION_PAUSE -> {
                 paused = true
-                wake.stop()
-                updateNotification("Приостановлено: приложение открыто")
+                if (::ears.isInitialized) ears.stop()
+                updateNotification("Пауза: приложение открыто")
             }
             ACTION_RESUME -> {
                 paused = false
-                if (!busy) resumeHotword()
+                if (!busy) listen()
             }
         }
         return START_STICKY
@@ -95,74 +88,54 @@ class JarvisService : Service() {
 
     override fun onDestroy() {
         running = false
-        wake.release()
+        ears.release()
         voice.release()
-        recognizer?.destroy()
         tts?.shutdown()
         super.onDestroy()
     }
 
     // ───────────── Цикл работы ─────────────
 
-    private fun resumeHotword() {
+    /** Включает микрофон: офлайн-распознавание русской речи работает непрерывно. */
+    private fun listen() {
         if (!ready || paused) return
         busy = false
-        followUps = 0
-        updateNotification("Слушаю слово «Джарвис»")
-        wake.start()
+        updateNotification(if (System.currentTimeMillis() < awaitUntil) "Слушаю, Сэр…" else "Скажите «Джарвис»")
+        Thread { ears.start() }.start()
     }
 
-    private fun onWake() {
-        if (paused) return
+    /** Каждая законченная фраза: ищем обращение «Джарвис» или ждём команду после сигнала. */
+    private fun onPhrase(phrase: String) {
+        if (paused || busy) return
+        val waiting = System.currentTimeMillis() < awaitUntil
+        val command = SpeechEngine.extractCommand(phrase)
+        when {
+            command != null && command.isNotBlank() -> handle(command)          // «Джарвис, который час»
+            command != null -> {                                                  // только «Джарвис»
+                followUps = 0
+                awaitUntil = System.currentTimeMillis() + 8000
+                beep()
+                updateNotification("Слушаю, Сэр…")
+            }
+            waiting -> handle(phrase)                                             // команда после сигнала
+            else -> Unit                                                          // посторонний разговор — игнорируем
+        }
+    }
+
+    private fun handle(text: String) {
         busy = true
-        beep()
-        main.postDelayed({ listenCommand() }, 250)
+        awaitUntil = 0
+        Thread { ears.stop() }.start()                      // не слушаем, пока думаем и говорим
+        process(text)
     }
 
-    private fun listenCommand() {
-        if (paused) return
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            say("Распознавание речи недоступно, Сэр.", false); return
-        }
-        updateNotification("Слушаю команду…")
-        recognizer?.destroy()
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-                override fun onResults(results: Bundle?) {
-                    val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                    if (text.isNullOrBlank()) resumeHotword() else process(text)
-                }
-                override fun onError(error: Int) {
-                    resumeHotword()
-                }
-            })
-        }
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        }
-        recognizer?.startListening(intent)
-    }
-
-    private fun process(heard: String) {
-        val text = heard.replace(Regex("^(джарвис|джервис|жарвис|jarvis)[\\s,]*", RegexOption.IGNORE_CASE), "").trim()
-        if (text.isEmpty()) {
-            say("Слушаю, Сэр.", true); return
-        }
+    private fun process(text: String) {
         val low = text.lowercase(Locale.forLanguageTag("ru-RU")).trim(' ', '.', '!')
         if (low in setOf("стоп", "хватит", "отдохни", "спасибо", "пока", "все", "всё", "ничего", "отмена")) {
             say("Буду рядом, Сэр.", false); return
         }
         commands.handle(text)?.let { reply ->
-            say(reply.text, reply.listenAfter && reply.text.trimEnd().endsWith("?")); return
+            say(reply.text, reply.text.trimEnd().endsWith("?")); return
         }
         updateNotification("Думаю…")
         Thread {
@@ -171,7 +144,7 @@ class JarvisService : Service() {
                 val cmd = Regex("CMD:\\s*(.+)", RegexOption.IGNORE_CASE).find(answer)
                 if (cmd != null) {
                     val reply = commands.handle(cmd.groupValues[1].lines().first().trim())
-                    say(reply?.text ?: "Не удалось выполнить команду, Сэр.", false)
+                    say(reply?.text ?: "Не удалось выполнить команду, Сэр.", reply?.text?.trimEnd()?.endsWith("?") == true)
                 } else {
                     say(answer, answer.trimEnd().endsWith("?"))
                 }
@@ -179,14 +152,18 @@ class JarvisService : Service() {
         }.start()
     }
 
-    /** Говорит ответ; если Джарвис задал вопрос — ждёт ответа без слова «Джарвис». */
+    /** Говорит ответ и снова включает слух; если Джарвис задал вопрос — ждёт ответа без «Джарвис». */
     private fun say(text: String, expectAnswer: Boolean) {
         updateNotification(text)
         val clean = text.replace(Regex("[\\[\\]{}<>*_#]"), " ")
         val next = {
-            if (expectAnswer && followUps < 3 && !paused) {
-                followUps++; listenCommand()
-            } else resumeHotword()
+            if (expectAnswer && followUps < 3) {
+                followUps++
+                awaitUntil = System.currentTimeMillis() + 8000
+            } else {
+                awaitUntil = 0
+            }
+            listen()
         }
         if (voice.ready) {
             val speed = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE).getFloat(JarvisPrefs.KEY_RATE, 1.0f)
