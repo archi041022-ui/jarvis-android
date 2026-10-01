@@ -202,12 +202,14 @@ class MainActivity : Activity() {
     // ───────────── Разрешения ─────────────
 
     private fun askPermissions() {
-        val wanted = arrayOf(
+        val list = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.CALL_PHONE,
             Manifest.permission.SEND_SMS
-        ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        )
+        if (android.os.Build.VERSION.SDK_INT >= 33) list.add(Manifest.permission.POST_NOTIFICATIONS)
+        val wanted = list.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (wanted.isNotEmpty()) requestPermissions(wanted.toTypedArray(), 1)
     }
 
@@ -497,10 +499,6 @@ class MainActivity : Activity() {
             return
         }
         if (!hasMic()) { askPermissions(); return }
-        if (android.os.Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
-        }
         if (!Settings.canDrawOverlays(this)) {
             AlertDialog.Builder(this)
                 .setTitle("Ещё одно разрешение")
