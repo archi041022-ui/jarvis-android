@@ -59,7 +59,13 @@ class JarvisVoice(private val context: Context) {
      * Озвучивает [text] и блокирует поток до конца фразы. Вызывать в фоновом потоке.
      * [speed] — 1.0 обычная скорость; [aiEffect] — эффект «голоса ИИ».
      */
-    fun speakBlocking(text: String, speed: Float, aiEffect: Boolean): Boolean {
+    fun speakBlocking(text: String, speed: Float, aiEffect: Boolean): Boolean = synchronized(speakLock) {
+        speakInner(text, speed, aiEffect)
+    }
+
+    private val speakLock = Any()
+
+    private fun speakInner(text: String, speed: Float, aiEffect: Boolean): Boolean {
         val engine = tts ?: return false
         stopped = false
         return try {

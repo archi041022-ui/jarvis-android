@@ -63,6 +63,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        JarvisPrefs.migrate(this)
         brain = Brain(this)
         commands = Commands(this)
         agent = Agent(commands, brain)
@@ -233,7 +234,7 @@ class MainActivity : Activity() {
             val prefs = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE)
             tts?.language = Locale.forLanguageTag("ru-RU")
             tts?.setPitch(prefs.getFloat(JarvisPrefs.KEY_PITCH, 1.0f))
-            tts?.setSpeechRate(prefs.getFloat(JarvisPrefs.KEY_RATE, 1.0f))
+            tts?.setSpeechRate(prefs.getFloat(JarvisPrefs.KEY_RATE, JarvisPrefs.DEFAULT_RATE))
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
                 override fun onDone(utteranceId: String?) {
@@ -255,7 +256,7 @@ class MainActivity : Activity() {
             .getString(JarvisPrefs.KEY_URL, "").isNullOrBlank()
         say(
             if (firstRun) "Руна на связи. Для свободного разговора выберите нейросеть в настройках. Команды телефона доступны уже сейчас."
-            else "Слушаю.",
+            else listOf("Привет! Слушаю.", "Да, я тут.", "Слушаю.").random(),
             listenAfter = true
         )
     }
@@ -268,7 +269,7 @@ class MainActivity : Activity() {
         val id = ++speechId
         val clean = text.replace(Regex("[\\[\\]{}<>*_#]"), " ")
         if (voice.ready) {
-            val speed = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE).getFloat(JarvisPrefs.KEY_RATE, 1.0f)
+            val speed = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE).getFloat(JarvisPrefs.KEY_RATE, JarvisPrefs.DEFAULT_RATE)
             Thread {
                 val ok = voice.speakBlocking(clean, speed, aiEffect = false)
                 main.post {
@@ -395,13 +396,13 @@ class MainActivity : Activity() {
 
     private fun process(heard: String) {
         log("Вы", heard)
-        val text = heard.replace(Regex("^(руна|руну|руне|runa)[\\s,]*", RegexOption.IGNORE_CASE), "").trim()
+        val text = SpeechEngine.extractCommand(heard) ?: heard.trim()
         if (text.isEmpty()) {
-            say("Слушаю."); return
+            say(listOf("Да?", "Слушаю.", "Да, слушаю.").random()); return
         }
         val low = text.lowercase(Locale.forLanguageTag("ru-RU")).trim(' ', '.', '!')
         if (low in setOf("стоп", "хватит", "отдохни", "спасибо", "пока", "все", "всё", "выключись")) {
-            say("Хорошо, я рядом.", listenAfter = false); return
+            say(listOf("Хорошо, я рядом.", "Ладно, если что — зовите.", "Поняла.").random(), listenAfter = false); return
         }
 
         thinking = true
@@ -457,7 +458,7 @@ class MainActivity : Activity() {
         label("Тембр голоса (0.5 — низкий, 1.0 — обычный)")
         val pitch = field("1.0", prefs.getFloat(JarvisPrefs.KEY_PITCH, 1.0f).toString())
         label("Скорость речи (0.8 — медленно, 1.2 — быстро)")
-        val rate = field("1.0", prefs.getFloat(JarvisPrefs.KEY_RATE, 1.0f).toString())
+        val rate = field("1.15", prefs.getFloat(JarvisPrefs.KEY_RATE, JarvisPrefs.DEFAULT_RATE).toString())
 
         AlertDialog.Builder(this)
             .setTitle("Настройки Руны")
@@ -469,7 +470,7 @@ class MainActivity : Activity() {
                     address = "$address:11434/v1"
                 }
                 val p = pitch.text.toString().replace(',', '.').toFloatOrNull()?.coerceIn(0.3f, 2f) ?: 1.0f
-                val r = rate.text.toString().replace(',', '.').toFloatOrNull()?.coerceIn(0.5f, 2f) ?: 1.0f
+                val r = rate.text.toString().replace(',', '.').toFloatOrNull()?.coerceIn(0.5f, 2f) ?: JarvisPrefs.DEFAULT_RATE
                 prefs.edit()
                     .putString(JarvisPrefs.KEY_URL, address)
                     .putString(JarvisPrefs.KEY_MODEL, model.text.toString().trim().ifEmpty { JarvisPrefs.DEFAULT_MODEL })

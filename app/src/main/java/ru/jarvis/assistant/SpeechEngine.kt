@@ -49,7 +49,7 @@ class SpeechEngine(private val context: Context, private val onPhrase: (String) 
                 modelConfig = model,
                 endpointConfig = EndpointConfig(
                     rule1 = EndpointRule(false, 2.0f, 0.0f),   // долгая тишина без речи
-                    rule2 = EndpointRule(true, 0.8f, 0.0f),    // пауза 0,8 с после речи — фраза закончена
+                    rule2 = EndpointRule(true, 0.6f, 0.0f),    // пауза 0,6 с после речи — фраза закончена (быстрее отклик)
                     rule3 = EndpointRule(false, 0.0f, 15.0f),  // не дольше 15 с на фразу
                 ),
                 enableEndpoint = true,
@@ -167,20 +167,21 @@ class SpeechEngine(private val context: Context, private val onPhrase: (String) 
         private val LOCK = Any()
 
         private val WAKE_VARIANTS = setOf(
-            "руна", "руну", "руны", "руне", "руной", "руночка", "рунa", "runa", "rune"
+            "руна", "руну", "руны", "руне", "руной", "руночка", "руно", "руня", "руни", "рона", "роуна",
+            "луна", "рунa", "runa", "rune"
         )
 
         /**
-         * Ищет обращение «Руна» среди первых слов фразы.
-         * Возвращает текст команды после обращения ("" — только имя) или null, если обращения нет.
+         * Ищет обращение «Руна» в любом месте фразы («Руна, открой камеру» и «открой камеру, Руна»).
+         * Возвращает текст команды без обращения ("" — только имя) или null, если обращения нет.
          */
         fun extractCommand(phrase: String): String? {
             val words = phrase.lowercase().replace('ё', 'е').split(Regex("\\s+")).filter { it.isNotBlank() }
-            for (i in 0 until minOf(4, words.size)) {
-                val one = words[i].trim(',', '.', '!', '?')
-                if (one in WAKE_VARIANTS) return words.drop(i + 1).joinToString(" ")
-                if (i + 1 < words.size && one == "ру" && words[i + 1].trim(',', '.', '!', '?') == "на") {   // «ру на»
-                    return words.drop(i + 2).joinToString(" ")
+            val clean = words.map { it.trim(',', '.', '!', '?') }
+            for (i in clean.indices) {
+                if (clean[i] in WAKE_VARIANTS) return (words.take(i) + words.drop(i + 1)).joinToString(" ").trim(' ', ',')
+                if (i + 1 < clean.size && clean[i] == "ру" && clean[i + 1] == "на") {          // «ру на»
+                    return (words.take(i) + words.drop(i + 2)).joinToString(" ").trim(' ', ',')
                 }
             }
             return null

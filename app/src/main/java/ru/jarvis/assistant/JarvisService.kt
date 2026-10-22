@@ -57,6 +57,7 @@ class JarvisService : Service() {
         startAsForeground("Руна готовится…")
         ears = SpeechEngine(this) { phrase -> main.post { onPhrase(phrase) } }
         voice = JarvisVoice(this)
+        JarvisPrefs.migrate(this)
         commands = Commands(this)
         brain = Brain(this)
         agent = Agent(commands, brain)
@@ -144,31 +145,38 @@ class JarvisService : Service() {
             command != null && command.isNotBlank() -> handle(command)          // «Руна, который час»
             command != null -> {                                                  // только «Руна»
                 followUps = 0
-                awaitUntil = System.currentTimeMillis() + 8000
-                beep()
-                updateNotification("Слушаю…")
+                handle(null)
+                say(listOf("Да?", "Слушаю.", "Да, слушаю.").random(), true)
             }
             waiting -> handle(phrase)                                             // команда после сигнала
             else -> Unit                                                          // посторонний разговор — игнорируем
         }
     }
 
-    private fun handle(text: String) {
+    private fun handle(text: String?) {
         busy = true
         busySince = System.currentTimeMillis()
         awaitUntil = 0
         micQueue.execute { ears.stop() }                     // не слушаем, пока думаем и говорим
-        process(text)
+        if (text != null) process(text)
     }
 
     private fun process(text: String) {
         val low = text.lowercase(Locale.forLanguageTag("ru-RU")).trim(' ', '.', '!')
         if (low in setOf("стоп", "хватит", "отдохни", "спасибо", "пока", "все", "всё", "ничего", "отмена")) {
-            say("Хорошо, я рядом.", false); return
+            say(listOf("Хорошо, я рядом.", "Ладно, если что — зовите.", "Поняла.").random(), false); return
         }
         updateNotification("Выполняю…")
         Thread {
+            var spoke = false
             val reply = agent.run(text) { status ->
+                if (!spoke && status == "Думаю…") {               // нейросеть думает — даём понять, что услышала
+                    spoke = true
+                    if (voice.ready) Thread {                           // говорим параллельно — нейросеть уже думает
+                        voice.speakBlocking(listOf("Секунду.", "Сейчас.", "Минутку.").random(),
+                            getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE).getFloat(JarvisPrefs.KEY_RATE, JarvisPrefs.DEFAULT_RATE), false)
+                    }.start()
+                }
                 busySince = System.currentTimeMillis()          // задача идёт — сторож не прерывает
                 main.post { updateNotification(status) }
             }
@@ -190,7 +198,7 @@ class JarvisService : Service() {
             listen()
         }
         if (voice.ready) {
-            val speed = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE).getFloat(JarvisPrefs.KEY_RATE, 1.0f)
+            val speed = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE).getFloat(JarvisPrefs.KEY_RATE, JarvisPrefs.DEFAULT_RATE)
             Thread {
                 val ok = voice.speakBlocking(clean, speed, aiEffect = false)
                 main.post { if (ok) next() else speakAndroid(clean, next) }
