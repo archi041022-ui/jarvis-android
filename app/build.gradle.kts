@@ -11,8 +11,8 @@ android {
         applicationId = "ru.jarvis.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "2.0"
+        versionCode = 9
+        versionName = "2.1"
 
         ndk {
             // Только 64-битные ARM-процессоры (Samsung A37 и все современные телефоны) — APK меньше
@@ -52,4 +52,6 @@ android {
 dependencies {
     // Офлайн-синтез речи sherpa-onnx (женский голос Piper «Ирина»). Файл скачивается при сборке на GitHub.
     implementation(files("libs/sherpa-onnx.aar"))
+    // Автономная нейросеть на телефоне (MediaPipe LLM Inference)
+    implementation("com.google.mediapipe:tasks-genai:0.10.24")
 }

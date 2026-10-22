@@ -77,6 +77,10 @@ class MainActivity : Activity() {
             }
         }.start()
         askPermissions()
+        // Офлайн-нейросеть: скачиваем один раз по Wi-Fi, чтобы Руна работала и без сети
+        if (LocalBrain.startDownload(this)) {
+            Toast.makeText(this, "Скачиваю офлайн-нейросеть (1,6 ГБ, только по Wi-Fi) — потом Руна сможет говорить и без интернета", Toast.LENGTH_LONG).show()
+        }
         if (prefs().getBoolean(JarvisPrefs.KEY_ALWAYS, true) && hasMic()) {
             JarvisService.start(this, paused = true)
         }
@@ -255,7 +259,7 @@ class MainActivity : Activity() {
         val firstRun = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE)
             .getString(JarvisPrefs.KEY_URL, "").isNullOrBlank()
         say(
-            if (firstRun) "Руна на связи. Для свободного разговора выберите нейросеть в настройках. Команды телефона доступны уже сейчас."
+            if (firstRun) "Привет, я Руна! Я работаю через ноутбук, через интернет и даже без сети. Говорите."
             else listOf("Привет! Слушаю.", "Да, я тут.", "Слушаю.").random(),
             listenAfter = true
         )
@@ -436,7 +440,13 @@ class MainActivity : Activity() {
             this.text = text; textSize = 12f; setPadding(0, dp(10), 0, 0)
         })
 
-        label("Где думает Руна — выберите вариант:")
+        label(when {
+            LocalBrain.isReady(this) -> "Офлайн-нейросеть на телефоне: готова ✓"
+            LocalBrain.isDownloading(this) -> "Офлайн-нейросеть: скачивается, ${LocalBrain.progress(this).coerceAtLeast(0)}%"
+            else -> "Офлайн-нейросеть: не скачана (скачается по Wi-Fi при открытии Руны)"
+        })
+        label("Руна сама выбирает: ноутбук в Wi-Fi → интернет (runachat.ru) → нейросеть на телефоне. " +
+            "Поле ниже можно оставить пустым. Свой сервис — по желанию:")
         val presets = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         box.addView(android.widget.HorizontalScrollView(this).apply { addView(presets) })
         label("Адрес нейросети")
