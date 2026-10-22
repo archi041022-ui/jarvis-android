@@ -8,15 +8,21 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * Служба специальных возможностей: позволяет Джарвису по голосовой команде
- * нажимать кнопки, вводить текст и листать экран в других приложениях.
- * Ничего не делает сама по себе — только когда её вызывает Джарвис.
+ * Служба специальных возможностей: позволяет Руне нажимать кнопки, вводить текст,
+ * листать и «видеть» текст на экране в других приложениях.
+ * Также поднимает Руну после перезагрузки телефона (служба включается системой сама).
  */
 class JarvisAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // Автозапуск Руны после перезагрузки: специальные возможности система включает сама
+        val prefs = getSharedPreferences(JarvisPrefs.PREFS, MODE_PRIVATE)
+        if (prefs.getBoolean(JarvisPrefs.KEY_ALWAYS, true) && !JarvisService.running &&
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            try { JarvisService.start(this) } catch (_: Throwable) {}
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -47,20 +53,67 @@ class JarvisAccessibilityService : AccessibilityService() {
     fun lockScreen(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN) else false
 
-    /** Нажимает на элемент, в тексте или описании которого есть [text]. */
-    fun clickText(text: String): Boolean {
+    /** Нажимает (или долго нажимает) на элемент, в тексте или описании которого есть [text]. */
+    fun clickText(text: String, long: Boolean = false): Boolean {
+        if (text.isBlank()) return false
         val root = rootInActiveWindow ?: return false
-        val nodes = root.findAccessibilityNodeInfosByText(text)
+        val action = if (long) AccessibilityNodeInfo.ACTION_LONG_CLICK else AccessibilityNodeInfo.ACTION_CLICK
+        val nodes = root.findAccessibilityNodeInfosByText(text).ifEmpty {
+            // распознавание могло исказить регистр или окончание — ищем по началу слова
+            val stem = text.lowercase().take(maxOf(3, text.length - 2))
+            collect(root).filter { (it.text ?: it.contentDescription)?.toString()?.lowercase()?.contains(stem) == true }
+        }
         for (node in nodes) {
             var current: AccessibilityNodeInfo? = node
             while (current != null) {
-                if (current.isClickable && current.isEnabled) {
-                    return current.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                if ((if (long) current.isLongClickable else current.isClickable) && current.isEnabled) {
+                    return current.performAction(action)
                 }
                 current = current.parent
             }
         }
         return false
+    }
+
+    /** Нажимает кнопку «Отправить» (или Enter в поле ввода). */
+    fun send(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        for (word in listOf("Отправить", "Send", "Отправ")) {
+            if (clickText(word)) return true
+        }
+        val field = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            field.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id) else false
+    }
+
+    /** Текст на экране для нейросети: приложение, кнопки и поля ввода (до 1500 символов). */
+    fun screenText(): String {
+        val root = rootInActiveWindow ?: return ""
+        val lines = LinkedHashSet<String>()
+        for (node in collect(root)) {
+            if (!node.isVisibleToUser) continue
+            val label = (node.text ?: node.contentDescription)?.toString()?.trim()?.replace('\n', ' ') ?: continue
+            if (label.isEmpty() || label.length > 120) continue
+            lines += when {
+                node.isEditable -> "поле: $label"
+                node.isClickable || node.parent?.isClickable == true -> "кнопка: $label"
+                else -> label
+            }
+        }
+        val app = root.packageName?.toString() ?: ""
+        return ("приложение: $app\n" + lines.joinToString("\n")).take(1500)
+    }
+
+    private fun collect(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+        val out = mutableListOf<AccessibilityNodeInfo>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty() && out.size < 400) {
+            val node = queue.removeFirst()
+            out += node
+            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
+        }
+        return out
     }
 
     /** Вводит [text] в активное поле ввода (или в первое найденное поле). */

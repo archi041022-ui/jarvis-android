@@ -77,7 +77,7 @@ class SpeechEngine(private val context: Context, private val onPhrase: (String) 
                 captureOnce(rec)
                 if (running) try { Thread.sleep(1000) } catch (_: InterruptedException) {}
             }
-        }.apply { name = "jarvis-asr"; start() }
+        }.apply { name = "runa-asr"; start() }
     }
 
     /** Одна сессия записи. Возвращается при ошибке микрофона или остановке. */
@@ -167,39 +167,23 @@ class SpeechEngine(private val context: Context, private val onPhrase: (String) 
         private val LOCK = Any()
 
         private val WAKE_VARIANTS = setOf(
-            "джарвис", "джарвиса", "джарвису", "джервис", "жарвис", "дарвис", "джарвиз", "джаврис",
-            "чарвис", "гарвис", "жервис", "джарви", "jarvis", "джарвик", "зарвис", "ярвис"
+            "руна", "руну", "руны", "руне", "руной", "руночка", "рунa", "runa", "rune"
         )
 
         /**
-         * Ищет обращение «Джарвис» среди первых слов фразы (с учётом ошибок распознавания).
+         * Ищет обращение «Руна» среди первых слов фразы.
          * Возвращает текст команды после обращения ("" — только имя) или null, если обращения нет.
          */
         fun extractCommand(phrase: String): String? {
             val words = phrase.lowercase().replace('ё', 'е').split(Regex("\\s+")).filter { it.isNotBlank() }
             for (i in 0 until minOf(4, words.size)) {
                 val one = words[i].trim(',', '.', '!', '?')
-                if (isWake(one)) return words.drop(i + 1).joinToString(" ")
-                if (i + 1 < words.size) {
-                    val two = one + words[i + 1].trim(',', '.', '!', '?')      // «джар вис»
-                    if (isWake(two)) return words.drop(i + 2).joinToString(" ")
+                if (one in WAKE_VARIANTS) return words.drop(i + 1).joinToString(" ")
+                if (i + 1 < words.size && one == "ру" && words[i + 1].trim(',', '.', '!', '?') == "на") {   // «ру на»
+                    return words.drop(i + 2).joinToString(" ")
                 }
             }
             return null
-        }
-
-        private fun isWake(w: String): Boolean =
-            w in WAKE_VARIANTS || (w.length in 5..9 && similarity(w, "джарвис") >= 0.75)
-
-        private fun similarity(a: String, b: String): Double {
-            val d = Array(a.length + 1) { IntArray(b.length + 1) }
-            for (i in 0..a.length) d[i][0] = i
-            for (j in 0..b.length) d[0][j] = j
-            for (i in 1..a.length) for (j in 1..b.length) {
-                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
-                d[i][j] = minOf(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
-            }
-            return 1.0 - d[a.length][b.length].toDouble() / maxOf(a.length, b.length)
         }
     }
 }

@@ -20,7 +20,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
- * Постоянно работающий Джарвис: слушает слово «Джарвис» без нажатий,
+ * Постоянно работающая Руна: слушает слово «Руна» без нажатий,
  * затем принимает команду, выполняет её и отвечает голосом.
  * Работает как служба с уведомлением в шторке (так требует Android для доступа к микрофону).
  */
@@ -31,12 +31,13 @@ class JarvisService : Service() {
     private lateinit var voice: JarvisVoice
     private lateinit var commands: Commands
     private lateinit var brain: Brain
+    private lateinit var agent: Agent
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var ready = false
     private var paused = false            // приложение открыто на экране — микрофоном занимается оно
     private var busy = false              // идёт обработка команды или ответ
-    private var awaitUntil = 0L           // до этого момента ждём команду без слова «Джарвис»
+    private var awaitUntil = 0L           // до этого момента ждём команду без слова «Руна»
     private var followUps = 0
     private var busySince = 0L
     // Все включения/выключения микрофона — строго по очереди, чтобы «выключить» не обогнало «включить»
@@ -53,15 +54,16 @@ class JarvisService : Service() {
     override fun onCreate() {
         super.onCreate()
         running = true
-        startAsForeground("Джарвис готовится…")
+        startAsForeground("Руна готовится…")
         ears = SpeechEngine(this) { phrase -> main.post { onPhrase(phrase) } }
         voice = JarvisVoice(this)
         commands = Commands(this)
         brain = Brain(this)
+        agent = Agent(commands, brain)
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.forLanguageTag("ru-RU")
-                tts?.setPitch(0.8f)
+                tts?.setPitch(1.0f)
                 ttsReady = true
             }
         }
@@ -113,12 +115,12 @@ class JarvisService : Service() {
     private fun listen() {
         if (!ready || paused) return
         busy = false
-        updateNotification(if (System.currentTimeMillis() < awaitUntil) "Слушаю, Сэр…" else "Скажите «Джарвис»")
+        updateNotification(if (System.currentTimeMillis() < awaitUntil) "Слушаю…" else "Скажите «Руна»")
         micQueue.execute { ears.start() }
     }
 
     /**
-     * Сторож: раз в 5 секунд проверяет, что Джарвис действительно слушает.
+     * Сторож: раз в 5 секунд проверяет, что Руна действительно слушает.
      * Если микрофон «отвалился» или ответ завис — перезапускает слух.
      */
     private fun checkHealth() {
@@ -133,18 +135,18 @@ class JarvisService : Service() {
         else if (silentTooLong) micQueue.execute { ears.stop(); ears.start() }
     }
 
-    /** Каждая законченная фраза: ищем обращение «Джарвис» или ждём команду после сигнала. */
+    /** Каждая законченная фраза: ищем обращение «Руна» или ждём команду после сигнала. */
     private fun onPhrase(phrase: String) {
         if (paused || busy) return
         val waiting = System.currentTimeMillis() < awaitUntil
         val command = SpeechEngine.extractCommand(phrase)
         when {
-            command != null && command.isNotBlank() -> handle(command)          // «Джарвис, который час»
-            command != null -> {                                                  // только «Джарвис»
+            command != null && command.isNotBlank() -> handle(command)          // «Руна, который час»
+            command != null -> {                                                  // только «Руна»
                 followUps = 0
                 awaitUntil = System.currentTimeMillis() + 8000
                 beep()
-                updateNotification("Слушаю, Сэр…")
+                updateNotification("Слушаю…")
             }
             waiting -> handle(phrase)                                             // команда после сигнала
             else -> Unit                                                          // посторонний разговор — игнорируем
@@ -162,27 +164,19 @@ class JarvisService : Service() {
     private fun process(text: String) {
         val low = text.lowercase(Locale.forLanguageTag("ru-RU")).trim(' ', '.', '!')
         if (low in setOf("стоп", "хватит", "отдохни", "спасибо", "пока", "все", "всё", "ничего", "отмена")) {
-            say("Буду рядом, Сэр.", false); return
+            say("Хорошо, я рядом.", false); return
         }
-        commands.handle(text)?.let { reply ->
-            say(reply.text, reply.text.trimEnd().endsWith("?")); return
-        }
-        updateNotification("Думаю…")
+        updateNotification("Выполняю…")
         Thread {
-            val answer = brain.ask(text)
-            main.post {
-                val cmd = Regex("CMD:\\s*(.+)", RegexOption.IGNORE_CASE).find(answer)
-                if (cmd != null) {
-                    val reply = commands.handle(cmd.groupValues[1].lines().first().trim())
-                    say(reply?.text ?: "Не удалось выполнить команду, Сэр.", reply?.text?.trimEnd()?.endsWith("?") == true)
-                } else {
-                    say(answer, answer.trimEnd().endsWith("?"))
-                }
+            val reply = agent.run(text) { status ->
+                busySince = System.currentTimeMillis()          // задача идёт — сторож не прерывает
+                main.post { updateNotification(status) }
             }
+            main.post { say(reply.text, reply.text.trimEnd().endsWith("?")) }
         }.start()
     }
 
-    /** Говорит ответ и снова включает слух; если Джарвис задал вопрос — ждёт ответа без «Джарвис». */
+    /** Говорит ответ и снова включает слух; если Руна задала вопрос — ждёт ответа без «Руна». */
     private fun say(text: String, expectAnswer: Boolean) {
         updateNotification(text)
         val clean = text.replace(Regex("[\\[\\]{}<>*_#]"), " ")
@@ -198,7 +192,7 @@ class JarvisService : Service() {
         if (voice.ready) {
             val speed = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE).getFloat(JarvisPrefs.KEY_RATE, 1.0f)
             Thread {
-                val ok = voice.speakBlocking(clean, speed, aiEffect = true)
+                val ok = voice.speakBlocking(clean, speed, aiEffect = false)
                 main.post { if (ok) next() else speakAndroid(clean, next) }
             }.start()
         } else speakAndroid(clean, next)
@@ -213,7 +207,7 @@ class JarvisService : Service() {
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) { main.post { onDone() } }
         })
-        if (engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.nanoTime()) != TextToSpeech.SUCCESS) onDone()
+        if (engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "runa-" + System.nanoTime()) != TextToSpeech.SUCCESS) onDone()
     }
 
     private fun beep() {
@@ -230,10 +224,11 @@ class JarvisService : Service() {
     private fun buildNotification(text: String): Notification {
         val manager = getSystemService(NotificationManager::class.java)!!
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager.getNotificationChannel(CHANNEL) == null) {
-            manager.deleteNotificationChannel("jarvis_listening")     // старый, заметный канал
+            manager.deleteNotificationChannel("jarvis_listening")     // старые каналы Джарвиса
+            manager.deleteNotificationChannel("jarvis_quiet")
             // Минимальная важность: без значка в строке состояния, без звука, свёрнуто внизу шторки
             manager.createNotificationChannel(
-                NotificationChannel(CHANNEL, "Джарвис в фоне", NotificationManager.IMPORTANCE_MIN).apply {
+                NotificationChannel(CHANNEL, "Руна в фоне", NotificationManager.IMPORTANCE_MIN).apply {
                     setShowBadge(false)
                     lockscreenVisibility = Notification.VISIBILITY_SECRET
                 }
@@ -252,7 +247,7 @@ class JarvisService : Service() {
         else Notification.Builder(this).setPriority(Notification.PRIORITY_MIN)
         return builder
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Джарвис")
+            .setContentTitle("Руна")
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
@@ -280,7 +275,7 @@ class JarvisService : Service() {
         const val ACTION_STOP = "ru.jarvis.assistant.STOP"
         const val ACTION_PAUSE = "ru.jarvis.assistant.PAUSE"
         const val ACTION_RESUME = "ru.jarvis.assistant.RESUME"
-        private const val CHANNEL = "jarvis_quiet"
+        private const val CHANNEL = "runa_quiet"
         private const val NOTIFICATION_ID = 7
 
         @Volatile

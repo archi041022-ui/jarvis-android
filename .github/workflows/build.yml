@@ -1,4 +1,4 @@
-name: Сборка APK Джарвиса
+name: Сборка APK Руны
 
 on:
   push:
@@ -23,24 +23,24 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
-      - name: Голос Джарвиса и библиотека синтеза речи
+      - name: Голос Руны и библиотека синтеза речи
         run: |
           set -e
-          mkdir -p app/libs app/src/main/assets/ruslan
+          mkdir -p app/libs app/src/main/assets/irina
           for v in 1.13.8 1.13.7 1.13.6 1.13.5 1.13.4 1.13.3 1.13.2 1.13.1 1.13.0 1.12.15 1.12.14 1.12.13; do
             if curl -fsSL -o app/libs/sherpa-onnx.aar "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$v/sherpa-onnx-$v.aar"; then
               echo "sherpa-onnx $v"; break
             fi
           done
           test -s app/libs/sherpa-onnx.aar
-          curl -fsSL -o voice.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ru_RU-ruslan-medium-int8.tar.bz2"
+          curl -fsSL -o voice.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ru_RU-irina-medium-int8.tar.bz2"
           tar xjf voice.tar.bz2
-          d=vits-piper-ru_RU-ruslan-medium-int8
+          d=vits-piper-ru_RU-irina-medium-int8
           ls -la "$d"
-          cp "$(ls "$d"/*.onnx | head -n 1)" app/src/main/assets/ruslan/model.onnx
-          cp "$d/tokens.txt" app/src/main/assets/ruslan/tokens.txt
-          cp -r "$d/espeak-ng-data" app/src/main/assets/ruslan/
-          du -sh app/src/main/assets/ruslan
+          cp "$(ls "$d"/*.onnx | head -n 1)" app/src/main/assets/irina/model.onnx
+          cp "$d/tokens.txt" app/src/main/assets/irina/tokens.txt
+          cp -r "$d/espeak-ng-data" app/src/main/assets/irina/
+          du -sh app/src/main/assets/irina
 
       - name: Офлайн-распознавание русской речи
         run: |
@@ -60,18 +60,18 @@ jobs:
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Переименование
-        run: cp app/build/outputs/apk/debug/app-debug.apk Jarvis.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Runa.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Jarvis-apk
-          path: Jarvis.apk
+          name: Runa-apk
+          path: Runa.apk
 
       - name: Публикация для скачивания на телефон
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: Джарвис, сборка ${{ github.run_number }}
-          body: Скачайте Jarvis.apk на телефон и установите.
+          tag_name: runa-${{ github.run_number }}
+          name: Руна, сборка ${{ github.run_number }}
+          body: Скачайте Runa.apk на телефон и установите поверх старой версии.
           make_latest: true
-          files: Jarvis.apk
+          files: Runa.apk

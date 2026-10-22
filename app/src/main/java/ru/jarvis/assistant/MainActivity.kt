@@ -40,6 +40,7 @@ class MainActivity : Activity() {
     private lateinit var orb: TextView
     private lateinit var brain: Brain
     private lateinit var commands: Commands
+    private lateinit var agent: Agent
 
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
@@ -54,8 +55,8 @@ class MainActivity : Activity() {
     private var greeted = false
     private val main = Handler(Looper.getMainLooper())
 
-    private val cyan = Color.parseColor("#4FD8FF")
-    private val dimCyan = Color.parseColor("#1E5A70")
+    private val cyan = Color.parseColor("#B79CFF")       // фирменный цвет Руны
+    private val dimCyan = Color.parseColor("#4A3A7A")
 
     // ───────────── Жизненный цикл ─────────────
 
@@ -64,17 +65,18 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         brain = Brain(this)
         commands = Commands(this)
+        agent = Agent(commands, brain)
         buildUi()
         initTts()
         voice = JarvisVoice(this)
         Thread {
             val ok = voice.init()
             main.post {
-                if (!ok) Toast.makeText(this, "Голос Джарвиса недоступен, использую голос Android", Toast.LENGTH_LONG).show()
+                if (!ok) Toast.makeText(this, "Голос Руны недоступен, использую голос Android", Toast.LENGTH_LONG).show()
             }
         }.start()
         askPermissions()
-        if (prefs().getBoolean(JarvisPrefs.KEY_ALWAYS, false) && hasMic()) {
+        if (prefs().getBoolean(JarvisPrefs.KEY_ALWAYS, true) && hasMic()) {
             JarvisService.start(this, paused = true)
         }
     }
@@ -113,12 +115,12 @@ class MainActivity : Activity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#05090F"))
+            setBackgroundColor(Color.parseColor("#0B0814"))
             setPadding(dp(20), dp(36), dp(20), dp(20))
         }
 
         val title = TextView(this).apply {
-            text = "J.A.R.V.I.S."
+            text = "РУНА"
             setTextColor(cyan)
             textSize = 28f
             typeface = Typeface.create("sans-serif-light", Typeface.BOLD)
@@ -127,7 +129,7 @@ class MainActivity : Activity() {
         }
         statusView = TextView(this).apply {
             text = "Инициализация систем…"
-            setTextColor(Color.parseColor("#9BE9FF"))
+            setTextColor(Color.parseColor("#D7C9FF"))
             textSize = 14f
             gravity = Gravity.CENTER
             setPadding(0, dp(6), 0, dp(18))
@@ -141,7 +143,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#0A1A26"))
+                setColor(Color.parseColor("#17112A"))
                 setStroke(dp(4), cyan)
             }
             setOnClickListener { if (listening) stopListening() else startListening() }
@@ -152,7 +154,7 @@ class MainActivity : Activity() {
         }
 
         logView = TextView(this).apply {
-            setTextColor(Color.parseColor("#D8F6FF"))
+            setTextColor(Color.parseColor("#EEE8FF"))
             textSize = 15f
             setLineSpacing(0f, 1.15f)
         }
@@ -183,7 +185,7 @@ class MainActivity : Activity() {
         setTextColor(cyan)
         background = GradientDrawable().apply {
             cornerRadius = dp(10).toFloat()
-            setColor(Color.parseColor("#0A1A26"))
+            setColor(Color.parseColor("#17112A"))
             setStroke(dp(1), dimCyan)
         }
         setOnClickListener { onClick() }
@@ -230,7 +232,7 @@ class MainActivity : Activity() {
             }
             val prefs = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE)
             tts?.language = Locale.forLanguageTag("ru-RU")
-            tts?.setPitch(prefs.getFloat(JarvisPrefs.KEY_PITCH, 0.8f))
+            tts?.setPitch(prefs.getFloat(JarvisPrefs.KEY_PITCH, 1.0f))
             tts?.setSpeechRate(prefs.getFloat(JarvisPrefs.KEY_RATE, 1.0f))
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
@@ -252,14 +254,14 @@ class MainActivity : Activity() {
         val firstRun = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE)
             .getString(JarvisPrefs.KEY_URL, "").isNullOrBlank()
         say(
-            if (firstRun) "Джарвис на связи, Сэр. Для свободного разговора выберите нейросеть в настройках. Команды телефона доступны уже сейчас."
-            else "Слушаю, Сэр.",
+            if (firstRun) "Руна на связи. Для свободного разговора выберите нейросеть в настройках. Команды телефона доступны уже сейчас."
+            else "Слушаю.",
             listenAfter = true
         )
     }
 
     private fun say(text: String, listenAfter: Boolean = true) {
-        log("Джарвис", text)
+        log("Руна", text)
         listenAfterSpeech = listenAfter
         setOrb("ГОВОРЮ", false)
         statusView.text = "Отвечаю"
@@ -268,7 +270,7 @@ class MainActivity : Activity() {
         if (voice.ready) {
             val speed = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE).getFloat(JarvisPrefs.KEY_RATE, 1.0f)
             Thread {
-                val ok = voice.speakBlocking(clean, speed, aiEffect = true)
+                val ok = voice.speakBlocking(clean, speed, aiEffect = false)
                 main.post {
                     if (id != speechId) return@post          // фразу прервали новой командой
                     if (ok) afterSpeech() else speakAndroid(clean)
@@ -286,7 +288,7 @@ class MainActivity : Activity() {
             afterSpeech()
             return
         }
-        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.nanoTime())
+        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "runa-" + System.nanoTime())
     }
 
     private fun afterSpeech() {
@@ -325,7 +327,7 @@ class MainActivity : Activity() {
         }
         listening = true
         setOrb("СЛУШАЮ", true)
-        statusView.text = "Слушаю, Сэр…"
+        statusView.text = "Слушаю…"
         recognizer?.startListening(intent)
     }
 
@@ -393,33 +395,23 @@ class MainActivity : Activity() {
 
     private fun process(heard: String) {
         log("Вы", heard)
-        val text = heard.replace(Regex("^(джарвис|джервис|жарвис|jarvis)[\\s,]*", RegexOption.IGNORE_CASE), "").trim()
+        val text = heard.replace(Regex("^(руна|руну|руне|runa)[\\s,]*", RegexOption.IGNORE_CASE), "").trim()
         if (text.isEmpty()) {
-            say("Слушаю, Сэр."); return
+            say("Слушаю."); return
         }
         val low = text.lowercase(Locale.forLanguageTag("ru-RU")).trim(' ', '.', '!')
         if (low in setOf("стоп", "хватит", "отдохни", "спасибо", "пока", "все", "всё", "выключись")) {
-            say("Буду рядом, Сэр.", listenAfter = false); return
-        }
-
-        commands.handle(text)?.let { reply ->
-            say(reply.text, reply.listenAfter); return
+            say("Хорошо, я рядом.", listenAfter = false); return
         }
 
         thinking = true
         setOrb("ДУМАЮ", false)
-        statusView.text = "Анализирую…"
+        statusView.text = "Выполняю…"
         Thread {
-            val answer = brain.ask(text)
+            val reply = agent.run(text) { status -> main.post { statusView.text = status } }
             main.post {
                 thinking = false
-                val cmd = Regex("CMD:\\s*(.+)", RegexOption.IGNORE_CASE).find(answer)
-                if (cmd != null) {
-                    val reply = commands.handle(cmd.groupValues[1].lines().first().trim())
-                    say(reply?.text ?: "Не удалось выполнить команду, Сэр.", reply?.listenAfter ?: true)
-                } else {
-                    say(answer, listenAfter = answer.trimEnd().endsWith("?"))
-                }
+                say(reply.text, reply.listenAfter)
             }
         }.start()
     }
@@ -443,7 +435,7 @@ class MainActivity : Activity() {
             this.text = text; textSize = 12f; setPadding(0, dp(10), 0, 0)
         })
 
-        label("Где думает Джарвис — выберите вариант:")
+        label("Где думает Руна — выберите вариант:")
         val presets = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         box.addView(android.widget.HorizontalScrollView(this).apply { addView(presets) })
         label("Адрес нейросети")
@@ -463,12 +455,12 @@ class MainActivity : Activity() {
         label("Ключ доступа (только для облачных сервисов, иначе пусто)")
         val key = field("необязательно", prefs.getString(JarvisPrefs.KEY_API, "") ?: "", password = true)
         label("Тембр голоса (0.5 — низкий, 1.0 — обычный)")
-        val pitch = field("0.8", prefs.getFloat(JarvisPrefs.KEY_PITCH, 0.8f).toString())
+        val pitch = field("1.0", prefs.getFloat(JarvisPrefs.KEY_PITCH, 1.0f).toString())
         label("Скорость речи (0.8 — медленно, 1.2 — быстро)")
         val rate = field("1.0", prefs.getFloat(JarvisPrefs.KEY_RATE, 1.0f).toString())
 
         AlertDialog.Builder(this)
-            .setTitle("Настройки Джарвиса")
+            .setTitle("Настройки Руны")
             .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("Сохранить") { _, _ ->
                 var address = url.text.toString().trim()
@@ -476,7 +468,7 @@ class MainActivity : Activity() {
                 if (address.isNotEmpty() && !address.contains(":11434") && !address.contains("/v1") && address.count { it == ':' } < 2) {
                     address = "$address:11434/v1"
                 }
-                val p = pitch.text.toString().replace(',', '.').toFloatOrNull()?.coerceIn(0.3f, 2f) ?: 0.8f
+                val p = pitch.text.toString().replace(',', '.').toFloatOrNull()?.coerceIn(0.3f, 2f) ?: 1.0f
                 val r = rate.text.toString().replace(',', '.').toFloatOrNull()?.coerceIn(0.5f, 2f) ?: 1.0f
                 prefs.edit()
                     .putString(JarvisPrefs.KEY_URL, address)
@@ -500,7 +492,7 @@ class MainActivity : Activity() {
 
     private fun updateAlwaysButton() {
         if (::alwaysButton.isInitialized) {
-            alwaysButton.text = if (JarvisService.running) "Слушать всегда: ВКЛ (скажите «Джарвис»)" else "Слушать всегда: выкл"
+            alwaysButton.text = if (JarvisService.running) "Слушать всегда: ВКЛ (скажите «Руна»)" else "Слушать всегда: выкл"
         }
     }
 
@@ -515,7 +507,7 @@ class MainActivity : Activity() {
         if (!Settings.canDrawOverlays(this)) {
             AlertDialog.Builder(this)
                 .setTitle("Ещё одно разрешение")
-                .setMessage("Чтобы Джарвис мог открывать приложения по голосу, когда вы в другом приложении, " +
+                .setMessage("Чтобы Руна могла открывать приложения по голосу, когда вы в другом приложении, " +
                     "включите для него «Поверх других приложений». Затем вернитесь и нажмите кнопку ещё раз.")
                 .setPositiveButton("Открыть") { _, _ ->
                     startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
@@ -539,7 +531,7 @@ class MainActivity : Activity() {
         prefs().edit().putBoolean(JarvisPrefs.KEY_ALWAYS, true).apply()
         JarvisService.start(this, paused = true)
         main.postDelayed({ updateAlwaysButton() }, 500)
-        Toast.makeText(this, "Готово. Сверните приложение и скажите «Джарвис»", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "Готово. Сверните приложение и скажите «Руна»", Toast.LENGTH_LONG).show()
     }
 
     private fun openAccessibility() {
@@ -550,10 +542,10 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Управление приложениями")
             .setMessage(
-                "Чтобы Джарвис мог нажимать кнопки и вводить текст в других приложениях:\n\n" +
+                "Чтобы Руна могла нажимать кнопки, вводить текст и видеть экран в других приложениях:\n\n" +
                     "1. Откроется список «Специальные возможности».\n" +
-                    "2. Выберите «Установленные приложения» → «Джарвис» и включите.\n\n" +
-                    "Если переключатель серый: «Настройки» → «Приложения» → «Джарвис» → ⋮ (справа вверху) → " +
+                    "2. Выберите «Установленные приложения» → «Руна» и включите.\n\n" +
+                    "Если переключатель серый: «Настройки» → «Приложения» → «Руна» → ⋮ (справа вверху) → " +
                     "«Разрешить ограниченные настройки», затем повторите."
             )
             .setPositiveButton("Открыть") { _, _ ->

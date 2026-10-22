@@ -14,8 +14,8 @@ import kotlin.math.abs
 import kotlin.math.sin
 
 /**
- * Офлайн-голос Джарвиса: Piper «Руслан» (через sherpa-onnx) + эффект ИИ —
- * короткое металлическое эхо и лёгкий цифровой призвук, как на ноутбуке.
+ * Офлайн-голос Руны: Piper «Ирина» (женский, через sherpa-onnx), как на ноутбуке.
+ * По желанию — эффект ИИ (короткое металлическое эхо).
  * Работает без интернета. Если что-то пошло не так, ready = false,
  * и приложение говорит стандартным голосом Android.
  */
@@ -30,6 +30,7 @@ class JarvisVoice(private val context: Context) {
     /** Подготовка голоса. Вызывать в фоновом потоке: при первом запуске копирует ~25 МБ. */
     fun init(): Boolean = synchronized(LOCK) {
         try {
+            File(context.filesDir, "ruslan").deleteRecursively()      // голос Джарвиса больше не нужен
             val dir = File(context.filesDir, VOICE_DIR)
             val marker = File(dir, ".ready-$DATA_VERSION")
             if (!marker.exists()) {
@@ -158,8 +159,8 @@ class JarvisVoice(private val context: Context) {
     }
 
     companion object {
-        private const val VOICE_DIR = "ruslan"
-        private const val DATA_VERSION = 1
+        private const val VOICE_DIR = "irina"
+        private const val DATA_VERSION = 2
         private val LOCK = Any()
     }
 }

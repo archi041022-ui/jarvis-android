@@ -20,7 +20,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Мгновенные команды: выполняются на телефоне сразу, без нейросети и без интернета.
+ * Мгновенные команды Руны: выполняются на телефоне сразу, без подтверждений, без нейросети и без интернета.
  * handle() возвращает ответ для озвучки или null, если команда не распознана.
  */
 class Commands(private val activity: Context) {
@@ -28,34 +28,27 @@ class Commands(private val activity: Context) {
     data class Reply(val text: String, val listenAfter: Boolean = true)
 
     private val ru = Locale.forLanguageTag("ru-RU")
-    private var pending: (() -> Reply)? = null
     private var torchOn = false
 
     fun handle(raw: String): Reply? {
         val t = raw.lowercase(ru).replace('ё', 'е').trim().trimEnd('.', '!', '?', ',').trim()
         if (t.isEmpty()) return null
 
-        // Подтверждение действия (звонок, SMS)
-        pending?.let { action ->
-            pending = null
-            return if (isYes(t)) action() else Reply("Отменено, Сэр.")
-        }
-
         // ── Время и дата ──
         if (Regex("который час|сколько (сейчас )?времени|какое время").containsMatchIn(t)) {
             val now = SimpleDateFormat("HH:mm", ru).format(Date())
-            return Reply("Сейчас $now, Сэр.")
+            return Reply("Сейчас $now.")
         }
         if (Regex("какое (сегодня )?число|какая (сегодня )?дата|какой сегодня день").containsMatchIn(t)) {
             val now = SimpleDateFormat("EEEE, d MMMM", ru).format(Date())
-            return Reply("Сегодня $now, Сэр.")
+            return Reply("Сегодня $now.")
         }
 
         // ── Фонарик ──
         if (t.contains("фонар")) {
             val on = !Regex("выключ|погас|убери").containsMatchIn(t)
-            return if (setTorch(on)) Reply(if (on) "Фонарик включён, Сэр." else "Фонарик выключен, Сэр.")
-            else Reply("Не удалось управлять фонариком, Сэр.")
+            return if (setTorch(on)) Reply(if (on) "Фонарик включён." else "Фонарик выключен.")
+            else Reply("Не удалось управлять фонариком.")
         }
 
         // ── Батарея ──
@@ -63,22 +56,22 @@ class Commands(private val activity: Context) {
             val bm = activity.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
             val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             val charging = bm.isCharging
-            return Reply("Заряд $level процентов${if (charging) ", идёт зарядка" else ""}, Сэр.")
+            return Reply("Заряд $level процентов${if (charging) ", идёт зарядка" else ""}.")
         }
 
         // ── Громкость ──
         val audio = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         if (Regex("^(сделай )?громче|прибавь (звук|громкость)|увеличь громкость").containsMatchIn(t)) {
             repeat(3) { audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI) }
-            return Reply("Громче, Сэр.")
+            return Reply("Громче.")
         }
         if (Regex("^(сделай )?тише|убавь (звук|громкость)|уменьши громкость").containsMatchIn(t)) {
             repeat(3) { audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI) }
-            return Reply("Тише, Сэр.")
+            return Reply("Тише.")
         }
         if (Regex("(выключи|отключи) звук|без звука").containsMatchIn(t)) {
             audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
-            return Reply("Звук выключен, Сэр.", listenAfter = false)
+            return Reply("Звук выключен.", listenAfter = false)
         }
 
         // ── Будильник и таймер ──
@@ -89,10 +82,10 @@ class Commands(private val activity: Context) {
                 val intent = Intent(AlarmClock.ACTION_SET_ALARM)
                     .putExtra(AlarmClock.EXTRA_HOUR, hour)
                     .putExtra(AlarmClock.EXTRA_MINUTES, minute)
-                    .putExtra(AlarmClock.EXTRA_MESSAGE, "Джарвис")
+                    .putExtra(AlarmClock.EXTRA_MESSAGE, "Руна")
                     .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-                return if (start(intent)) Reply("Будильник на ${hour}:${"%02d".format(minute)} установлен, Сэр.")
-                else Reply("Не удалось поставить будильник, Сэр.")
+                return if (start(intent)) Reply("Будильник на ${hour}:${"%02d".format(minute)} установлен.")
+                else Reply("Не удалось поставить будильник.")
             }
         }
         Regex("таймер\\D*(\\d+)\\s*(сек|мин|час)").find(t)?.let { m ->
@@ -100,9 +93,9 @@ class Commands(private val activity: Context) {
             val seconds = when (m.groupValues[2]) { "сек" -> n; "мин" -> n * 60; else -> n * 3600 }
             val intent = Intent(AlarmClock.ACTION_SET_TIMER)
                 .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
-                .putExtra(AlarmClock.EXTRA_MESSAGE, "Джарвис")
+                .putExtra(AlarmClock.EXTRA_MESSAGE, "Руна")
                 .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-            return if (start(intent)) Reply("Таймер запущен, Сэр.") else Reply("Не удалось запустить таймер, Сэр.")
+            return if (start(intent)) Reply("Таймер запущен.") else Reply("Не удалось запустить таймер.")
         }
 
         // ── Wi-Fi, Bluetooth, авиарежим (Android не даёт приложениям переключать их сам — открываем панель) ──
@@ -110,60 +103,70 @@ class Commands(private val activity: Context) {
             val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Intent(Settings.Panel.ACTION_WIFI)
             else Intent(Settings.ACTION_WIFI_SETTINGS)
             start(intent)
-            return Reply("Открываю Wi-Fi, Сэр.", listenAfter = false)
+            return Reply("Открываю Wi-Fi.", listenAfter = false)
         }
         if (Regex("блютуз|bluetooth|блютус").containsMatchIn(t)) {
             start(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-            return Reply("Открываю Bluetooth, Сэр.", listenAfter = false)
+            return Reply("Открываю Bluetooth.", listenAfter = false)
         }
         if (Regex("авиарежим|режим полета").containsMatchIn(t)) {
             start(Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS))
-            return Reply("Открываю настройки авиарежима, Сэр.", listenAfter = false)
+            return Reply("Открываю настройки авиарежима.", listenAfter = false)
         }
 
         // ── YouTube и поиск ──
         Regex("(?:включи|найди|открой|поставь) (?:на|в) (?:ютубе|ютуб|youtube) (.+)").find(t)?.let { m ->
             start(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(m.groupValues[1]))))
-            return Reply("Ищу на YouTube, Сэр.", listenAfter = false)
+            return Reply("Ищу на YouTube.", listenAfter = false)
         }
         Regex("^(?:найди|поищи|загугли)(?: в интернете)? (.+)").find(t)?.let { m ->
-            start(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(m.groupValues[1]))))
-            return Reply("Ищу, Сэр.", listenAfter = false)
+            start(Intent(Intent.ACTION_VIEW, Uri.parse("https://yandex.ru/search/?text=" + Uri.encode(m.groupValues[1]))))
+            return Reply("Ищу.", listenAfter = false)
         }
 
-        // ── Звонки и SMS (с подтверждением) ──
-        Regex("^(?:позвони|набери|вызови|звони) (.+)").find(t)?.let { m ->
-            if (!has(Manifest.permission.CALL_PHONE)) return Reply("Нет разрешения на звонки, Сэр. Разрешите его в настройках приложения.")
-            val (name, number) = findContact(m.groupValues[1]) ?: return Reply("Не нашёл такой контакт, Сэр.")
-            pending = {
-                start(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number))))
-                Reply("Звоню, Сэр.", listenAfter = false)
-            }
-            return Reply("Позвонить: $name? Скажите да или нет.")
+        // ── Ссылка ──
+        Regex("^открой (?:ссылку|сайт|страницу) (.+)").find(t)?.let {
+            var url = raw.trim().split(Regex("\\s+"), 3).getOrElse(2) { "" }.replace(" ", "")
+            if (!url.startsWith("http")) url = "https://$url"
+            return if (start(Intent(Intent.ACTION_VIEW, Uri.parse(url)))) Reply("Открываю.", listenAfter = false)
+            else Reply("Не удалось открыть ссылку.")
         }
-        Regex("^(?:напиши|отправь (?:смс|сообщение)) (\\S+) (.+)").find(t)?.let { m ->
-            if (!has(Manifest.permission.SEND_SMS)) return Reply("Нет разрешения на SMS, Сэр. Разрешите его в настройках приложения.")
-            val (name, number) = findContact(m.groupValues[1]) ?: return Reply("Не нашёл такой контакт, Сэр.")
+
+        // ── Звонки и SMS (сразу, без подтверждения) ──
+        Regex("^(?:позвони|набери|вызови|звони) (.+)").find(t)?.let { m ->
+            if (!has(Manifest.permission.CALL_PHONE)) return Reply("Нет разрешения на звонки. Разрешите его в настройках приложения.")
+            val (name, number) = findContact(m.groupValues[1]) ?: return Reply("Не нашла такой контакт.")
+            start(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number))))
+            return Reply("Звоню: $name.", listenAfter = false)
+        }
+        Regex("^(?:напиши|отправь (?:смс|сообщение)) (\\S+) (.+)").find(t)
+            ?.takeIf { it.groupValues[1].length >= 3 && it.groupValues[1] !in setOf("в", "во", "на", "по", "смс", "сообщение") }
+            ?.let { m ->
+            if (!has(Manifest.permission.SEND_SMS)) return Reply("Нет разрешения на SMS. Разрешите его в настройках приложения.")
+            val (name, number) = findContact(m.groupValues[1]) ?: return Reply("Не нашла такой контакт.")
             val text = m.groupValues[2].replaceFirstChar { it.uppercase(ru) }
-            pending = {
-                try {
-                    @Suppress("DEPRECATION")
-                    val sms: SmsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                        activity.getSystemService(SmsManager::class.java)!! else SmsManager.getDefault()
-                    sms.sendMultipartTextMessage(number, null, sms.divideMessage(text), null, null)
-                    Reply("Сообщение отправлено, Сэр.")
-                } catch (e: Exception) {
-                    Reply("Не удалось отправить сообщение, Сэр.")
-                }
+            return try {
+                @Suppress("DEPRECATION")
+                val sms: SmsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                    activity.getSystemService(SmsManager::class.java)!! else SmsManager.getDefault()
+                sms.sendMultipartTextMessage(number, null, sms.divideMessage(text), null, null)
+                Reply("Сообщение для $name отправлено.")
+            } catch (e: Exception) {
+                Reply("Не удалось отправить сообщение.")
             }
-            return Reply("Отправить $name сообщение: «$text»? Скажите да или нет.")
         }
 
         // ── Управление экраном (служба специальных возможностей) ──
-        val screenCmd = Regex("^(назад|домой|на главный|недавние|последние приложения|уведомления|шторк|быстрые настройки|скриншот|снимок экрана|заблокируй|блокировка|листай|прокрути|нажми|введи|напечатай)").find(t)
+        if (t == "подожди" || t == "жди") {
+            Thread.sleep(2000); return Reply("Подождала 2 секунды.")
+        }
+        val screenCmd = Regex("^(назад|домой|на главный|недавние|последние приложения|уведомления|шторк|быстрые настройки|скриншот|снимок экрана|заблокируй|блокировка|листай|прокрути|долгое нажатие|нажми|введи|напечатай|отправь$|экран$|что на экране|прочитай экран)").find(t)
         if (screenCmd != null) {
             val svc = JarvisAccessibilityService.instance
-                ?: return Reply("Сэр, сначала включите управление приложениями: «Настройки» Джарвиса, кнопка «Управление приложениями».")
+                ?: return Reply("Сначала включите управление приложениями: кнопка «Управление приложениями» в Руне.")
+            if (t.startsWith("экран") || t.startsWith("что на экране") || t.startsWith("прочитай экран")) {
+                return Reply(svc.screenText().ifBlank { "Экран пустой." })
+            }
             val ok = when {
                 t.startsWith("назад") -> svc.back()
                 t.startsWith("домой") || t.startsWith("на главный") -> svc.home()
@@ -173,27 +176,27 @@ class Commands(private val activity: Context) {
                 t.startsWith("скриншот") || t.startsWith("снимок экрана") -> svc.screenshot()
                 t.startsWith("заблокируй") || t.startsWith("блокировка") -> svc.lockScreen()
                 t.startsWith("листай") || t.startsWith("прокрути") -> svc.scroll(!t.contains("вверх"))
+                t.startsWith("долгое нажатие") -> svc.clickText(raw.trim().split(Regex("\\s+"), 3).getOrElse(2) { "" }.trimEnd('.', '!'), long = true)
                 t.startsWith("нажми") -> svc.clickText(raw.trim().substringAfter(' ').trim().trimEnd('.', '!'))
+                t.startsWith("отправь") -> svc.send()
                 else -> svc.typeText(raw.trim().substringAfter(' ').trim().trimEnd('.'))
             }
-            return if (ok) Reply("Готово, Сэр.", listenAfter = false) else Reply("Не получилось, Сэр.")
+            return if (ok) Reply("Готово.", listenAfter = false) else Reply("Не получилось.")
         }
 
         // ── Открыть приложение ──
         Regex("^(?:открой|запусти|включи) (.+)").find(t)?.let { m ->
             val target = m.groupValues[1]
-            val pkg = findApp(target) ?: return Reply("Не нашёл приложение «$target», Сэр.")
-            val intent = activity.packageManager.getLaunchIntentForPackage(pkg) ?: return Reply("Это приложение нельзя открыть, Сэр.")
+            val pkg = findApp(target) ?: return Reply("Не нашла приложение «$target».")
+            val intent = activity.packageManager.getLaunchIntentForPackage(pkg) ?: return Reply("Это приложение нельзя открыть.")
             start(intent)
-            return Reply("Открываю, Сэр.", listenAfter = false)
+            return Reply("Открываю.", listenAfter = false)
         }
 
         return null
     }
 
     // ───────────── Вспомогательное ─────────────
-
-    private fun isYes(t: String) = Regex("^(да|давай|подтверждаю|звони|отправляй|конечно|ага|угу)").containsMatchIn(t)
 
     private fun has(permission: String) =
         activity.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED

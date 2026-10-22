@@ -6,5 +6,6 @@ local.properties
 *.iml
 /app/libs/
 /app/src/main/assets/ruslan/
+/app/src/main/assets/irina/
 /app/src/main/assets/wakeword/
 /app/src/main/assets/asr/
