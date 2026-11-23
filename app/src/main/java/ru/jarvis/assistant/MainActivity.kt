@@ -24,6 +24,8 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -35,7 +37,7 @@ import java.util.Locale
 class MainActivity : Activity() {
 
     private lateinit var statusView: TextView
-    private lateinit var logView: TextView
+    private lateinit var logView: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var orb: TextView
     private lateinit var brain: Brain
@@ -49,17 +51,22 @@ class MainActivity : Activity() {
     private lateinit var alwaysButton: Button
     @Volatile private var speechId = 0L
     private var listening = false
+    private var recognitionAttempt = 0
+    private var foreground = false
+    private var openingMessenger = false
+    private var listenWhenResumed = false
+    private var busyRetries = 0
     private var thinking = false
     private var listenAfterSpeech = false
     private var missedInRow = 0
     private var greeted = false
     private val main = Handler(Looper.getMainLooper())
 
-    private val backgroundColor = Color.parseColor("#091518")
-    private val panelColor = Color.parseColor("#122529")
-    private val borderColor = Color.parseColor("#375557")
-    private val accentColor = Color.parseColor("#9CE8D4")
-    private val textColor = Color.parseColor("#EFF8F5")
+    private val backgroundColor = Color.parseColor("#121026")
+    private val panelColor = Color.parseColor("#211D3A")
+    private val borderColor = Color.parseColor("#50466E")
+    private val accentColor = Color.parseColor("#CBB9FF")
+    private val textColor = Color.parseColor("#F7F2FF")
 
     // ───────────── Жизненный цикл ─────────────
 
@@ -84,9 +91,7 @@ class MainActivity : Activity() {
         if (LocalBrain.startDownload(this)) {
             Toast.makeText(this, "Скачиваю офлайн-нейросеть (1,6 ГБ, только по Wi-Fi) — потом Руна сможет говорить и без интернета", Toast.LENGTH_LONG).show()
         }
-        if (prefs().getBoolean(JarvisPrefs.KEY_ALWAYS, true) && hasMic()) {
-            JarvisService.start(this, paused = true)
-        }
+        startBackgroundListeningIfEnabled()
     }
 
     private fun prefs() = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE)
@@ -94,19 +99,31 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // Повторное открытие (кнопка, боковая клавиша) — сразу слушаем
-        if (ttsReady) startListening()
+        if (ttsReady && foreground) startListening()
+        else if (ttsReady) listenWhenResumed = true
     }
 
     override fun onResume() {
         super.onResume()
+        foreground = true
+        openingMessenger = false
         JarvisService.send(this, JarvisService.ACTION_PAUSE)   // пока приложение на экране, слушает оно само
         updateAlwaysButton()
+        if (listenWhenResumed) {
+            listenWhenResumed = false
+            startListening()
+        }
     }
 
     override fun onPause() {
         super.onPause()
+        foreground = false
+        listenAfterSpeech = false
+        speechId++
+        tts?.stop()
+        voice.stop()
         stopListening()
-        JarvisService.send(this, JarvisService.ACTION_RESUME)
+        if (!openingMessenger) JarvisService.send(this, JarvisService.ACTION_RESUME)
     }
 
     override fun onDestroy() {
@@ -123,7 +140,8 @@ class MainActivity : Activity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(backgroundColor)
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.parseColor("#292147"), backgroundColor))
             setPadding(dp(20), dp(12), dp(20), dp(14))
         }
         root.setOnApplyWindowInsetsListener { view, insets ->
@@ -144,6 +162,10 @@ class MainActivity : Activity() {
             addView(title, LinearLayout.LayoutParams(0, dp(54), 1f))
             addView(makeButton("Настройки") { showSettings() }, LinearLayout.LayoutParams(-2, dp(48)))
         }
+        val messenger = makeButton("Руна в мессенджере") {
+            openingMessenger = true
+            startActivity(Intent(this, MessengerActivity::class.java))
+        }
         statusView = TextView(this).apply {
             text = "Запускаюсь…"
             setTextColor(accentColor)
@@ -154,7 +176,7 @@ class MainActivity : Activity() {
         }
 
         orb = TextView(this).apply {
-            text = "Говорите"
+            text = "Микрофон"
             setTextColor(accentColor)
             textSize = 16f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -164,17 +186,18 @@ class MainActivity : Activity() {
                 setColor(panelColor)
                 setStroke(dp(1), borderColor)
             }
-            setOnClickListener { if (listening) stopListening() else startListening() }
+            setOnClickListener {
+                busyRetries = 0
+                if (listening) stopListening() else startListening()
+            }
         }
         val orbBox = LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            addView(orb, LinearLayout.LayoutParams(-1, dp(64)))
+            addView(orb, LinearLayout.LayoutParams(-1, dp(52)))
         }
 
-        logView = TextView(this).apply {
-            setTextColor(textColor)
-            textSize = 15f
-            setLineSpacing(0f, 1.15f)
+        logView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
         }
         scroll = ScrollView(this).apply {
             addView(logView)
@@ -187,10 +210,36 @@ class MainActivity : Activity() {
 
         alwaysButton = makeButton("Слушать всегда: выкл") { toggleAlways() }
 
+        val composer = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val field = EditText(this).apply {
+            hint = "Спросите Руну"
+            setTextColor(textColor)
+            setHintTextColor(accentColor)
+            setSingleLine(true)
+            imeOptions = EditorInfo.IME_ACTION_SEND
+            textSize = 16f
+        }
+        val send: () -> Unit = {
+            val question = field.text.toString().trim()
+            if (question.isNotEmpty() && !thinking) {
+                stopListening()
+                field.text.clear()
+                getSystemService(InputMethodManager::class.java)
+                    ?.hideSoftInputFromWindow(field.windowToken, 0)
+                process(question)
+            }
+        }
+        field.setOnEditorActionListener { _, action, _ ->
+            if (action == EditorInfo.IME_ACTION_SEND) { send(); true } else false
+        }
+        composer.addView(field, LinearLayout.LayoutParams(0, dp(50), 1f))
+        composer.addView(makeButton("Отправить", send), LinearLayout.LayoutParams(-2, dp(48)))
         root.addView(header)
+        root.addView(messenger, LinearLayout.LayoutParams(-1, dp(48)))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(12) })
         root.addView(statusView)
         root.addView(orbBox)
+        root.addView(composer)
         root.addView(alwaysButton, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
         root.addView(makeButton("Управление приложениями") { openAccessibility() },
             LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
@@ -221,7 +270,25 @@ class MainActivity : Activity() {
     }
 
     private fun log(who: String, text: String) {
-        logView.append("$who: $text\n\n")
+        val mine = who == "Вы"
+        val bubble = TextView(this).apply {
+            this.text = "$who\n$text"
+            textSize = 15f
+            setTextColor(textColor)
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setTextIsSelectable(true)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat()
+                setColor(Color.parseColor(if (mine) "#534473" else "#32294E"))
+            }
+        }
+        logView.addView(bubble, LinearLayout.LayoutParams(-1, -2).apply {
+            leftMargin = if (mine) dp(24) else 0
+            rightMargin = if (mine) 0 else dp(24)
+            bottomMargin = dp(8)
+        })
+        if (logView.childCount > 80) logView.removeViewAt(0)
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
@@ -241,10 +308,19 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (hasMic() && ttsReady && !greeted) greet()
+        if (requestCode == 1 && hasMic()) {
+            startBackgroundListeningIfEnabled()
+            if (ttsReady && !greeted) greet()
+        }
     }
 
     private fun hasMic() = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    private fun startBackgroundListeningIfEnabled() {
+        if (hasMic() && !JarvisService.running && prefs().getBoolean(JarvisPrefs.KEY_ALWAYS, true)) {
+            JarvisService.start(this, paused = true)
+        }
+    }
 
     // ───────────── Голос ─────────────
 
@@ -275,13 +351,7 @@ class MainActivity : Activity() {
 
     private fun greet() {
         greeted = true
-        val firstRun = getSharedPreferences(JarvisPrefs.PREFS, Context.MODE_PRIVATE)
-            .getString(JarvisPrefs.KEY_URL, "").isNullOrBlank()
-        say(
-            if (firstRun) "Привет, я Руна! Я работаю через ноутбук, через интернет и даже без сети. Говорите."
-            else listOf("Привет! Слушаю.", "Да, я тут.", "Слушаю.").random(),
-            listenAfter = true
-        )
+        if (foreground) startListening() else listenWhenResumed = true
     }
 
     private fun say(text: String, listenAfter: Boolean = true) {
@@ -316,13 +386,14 @@ class MainActivity : Activity() {
     }
 
     private fun afterSpeech() {
-        if (listenAfterSpeech && hasWindowFocus()) startListening() else setIdle()
+        if (foreground && listenAfterSpeech && hasWindowFocus()) startListening() else setIdle()
     }
 
     private fun setIdle() {
         listening = false
-        setOrb("ГОВОРИТЕ", false)
-        statusView.text = "Нажмите на кольцо, чтобы дать команду"
+        orb.alpha = 1f
+        setOrb("Микрофон", false)
+        statusView.text = "Готова к разговору"
     }
 
     // ───────────── Слух ─────────────
@@ -331,7 +402,7 @@ class MainActivity : Activity() {
         if (!hasMic()) {
             askPermissions(); return
         }
-        if (thinking) return
+        if (thinking || !foreground || listening) return
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             statusView.text = "Распознавание речи недоступно на этом телефоне."
             return
@@ -340,8 +411,9 @@ class MainActivity : Activity() {
         speechId++
         voice.stop()
         recognizer?.destroy()
+        val attempt = ++recognitionAttempt
         recognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(listener)
+            setRecognitionListener(listener(attempt))
         }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -356,31 +428,37 @@ class MainActivity : Activity() {
     }
 
     private fun stopListening() {
-        if (listening) recognizer?.cancel()
+        recognitionAttempt++
+        recognizer?.cancel()
+        recognizer?.destroy()
+        recognizer = null
         listening = false
         if (!thinking) setIdle()
     }
 
-    private val listener = object : RecognitionListener {
+    private fun listener(attempt: Int) = object : RecognitionListener {
+        private fun current() = foreground && attempt == recognitionAttempt
         override fun onReadyForSpeech(params: Bundle?) {}
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) {
-            val scale = 1f + (rmsdB.coerceIn(0f, 10f) / 60f)
-            orb.scaleX = scale; orb.scaleY = scale
+            if (current()) orb.alpha = 0.85f + rmsdB.coerceIn(0f, 10f) / 67f
         }
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {
-            orb.scaleX = 1f; orb.scaleY = 1f
+            if (current()) orb.alpha = 1f
         }
         override fun onPartialResults(partialResults: Bundle?) {
+            if (!current()) return
             val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
             if (!partial.isNullOrBlank()) statusView.text = partial
         }
         override fun onEvent(eventType: Int, params: Bundle?) {}
 
         override fun onResults(results: Bundle?) {
+            if (!current()) return
             listening = false
-            orb.scaleX = 1f; orb.scaleY = 1f
+            orb.alpha = 1f
+            busyRetries = 0
             val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
             if (text.isNullOrBlank()) onMiss() else {
                 missedInRow = 0
@@ -389,9 +467,17 @@ class MainActivity : Activity() {
         }
 
         override fun onError(error: Int) {
+            if (!current()) return
             listening = false
-            orb.scaleX = 1f; orb.scaleY = 1f
+            orb.alpha = 1f
             when (error) {
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY, SpeechRecognizer.ERROR_AUDIO -> {
+                    setIdle()
+                    if (++busyRetries <= 2) {
+                        statusView.text = "Подключаю микрофон…"
+                        main.postDelayed({ if (current() && !thinking && !listening) startListening() }, 450L * busyRetries)
+                    } else statusView.text = "Микрофон занят. Попробуйте ещё раз или напишите."
+                }
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> onMiss()
                 SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
                     setIdle(); statusView.text = "Нет связи с сервисом распознавания речи."
@@ -401,7 +487,7 @@ class MainActivity : Activity() {
                 }
                 SpeechRecognizer.ERROR_CLIENT -> setIdle()
                 else -> {
-                    setIdle(); statusView.text = "Ошибка распознавания ($error). Нажмите на кольцо ещё раз."
+                    setIdle(); statusView.text = "Не удалось распознать речь. Попробуйте ещё раз или напишите."
                 }
             }
         }
@@ -418,6 +504,7 @@ class MainActivity : Activity() {
     // ───────────── Обработка команды ─────────────
 
     private fun process(heard: String) {
+        if (thinking) return
         log("Вы", heard)
         val text = SpeechEngine.extractCommand(heard) ?: heard.trim()
         if (text.isEmpty()) {
@@ -435,7 +522,9 @@ class MainActivity : Activity() {
             val reply = agent.run(text) { status -> main.post { statusView.text = status } }
             main.post {
                 thinking = false
-                say(reply.text, reply.listenAfter)
+                if (isDestroyed) return@post
+                if (foreground) say(reply.text, reply.listenAfter)
+                else { log("Руна", reply.text); setIdle() }
             }
         }.start()
     }
@@ -464,8 +553,8 @@ class MainActivity : Activity() {
             LocalBrain.isDownloading(this) -> "Офлайн-нейросеть: скачивается, ${LocalBrain.progress(this).coerceAtLeast(0)}%"
             else -> "Офлайн-нейросеть: не скачана (скачается по Wi-Fi при открытии Руны)"
         })
-        label("Руна сама выбирает: ноутбук в Wi-Fi → интернет (runachat.ru) → нейросеть на телефоне. " +
-            "Поле ниже можно оставить пустым. Свой сервис — по желанию:")
+        label("По умолчанию Руна отвечает через runachat.ru. Можно выбрать свой сервис или ноутбук. " +
+            "Если сервер недоступен, Руна попробует ответить через ноутбук в Wi-Fi или с помощью скачанной модели.")
         val presets = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         box.addView(android.widget.HorizontalScrollView(this).apply { addView(presets) })
         label("Адрес нейросети")

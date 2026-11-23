@@ -11,8 +11,8 @@ import java.util.Locale
 
 /**
  * «Мозг» Руны: обращается к нейросети по протоколу, совместимому с OpenAI.
- * По умолчанию — к Ollama на ноутбуке в той же сети Wi-Fi (бесплатно, данные не уходят в интернет).
- * В настройках можно указать любой другой совместимый сервер и ключ доступа.
+ * Использует выбранный в настройках сервис или сервер «Руны» в интернете.
+ * Ноутбук и локальная модель доступны при отсутствии связи с сервером.
  */
 class Brain(private val context: Context) {
 
@@ -31,6 +31,7 @@ class Brain(private val context: Context) {
      * 3) автономно — нейросеть прямо на телефоне, без сети.
      */
     fun ask(text: String): String {
+        mode = ""
         val stamp = SimpleDateFormat("dd.MM.yyyy HH:mm, EEEE", Locale.forLanguageTag("ru-RU")).format(Date())
         // Старые снимки экрана больше не нужны — убираем, чтобы не переполнять память нейросети
         for (i in history.indices) {
@@ -61,12 +62,18 @@ class Brain(private val context: Context) {
         if (saved.isNotEmpty() && !saved.contains(":11434")) {
             remote(saved, key, model)?.let { mode = "свой сервис"; return it }
         }
-        // 1. Ноутбук в Wi-Fi: по сохранённому адресу, иначе поищем в сети
-        laptop(saved)?.let { base ->
-            remote(base, "", if (saved.contains(":11434")) model else JarvisPrefs.DEFAULT_MODEL)?.let { mode = "ноутбук"; return it }
+        // Явно выбранный ноутбук имеет приоритет.
+        if (saved.contains(":11434") && LaptopFinder.reachable(saved)) {
+            remote(saved, "", model)?.let { mode = "ноутбук"; return it }
         }
         // 2. Через интернет — сервер runachat.ru
         remote(SERVER_URL, SERVER_TOKEN, "yandexgpt-lite")?.let { mode = "интернет"; return it }
+        // Поиск в сети выполняется только после попытки связаться с интернет-сервисом.
+        if (!saved.contains(":11434")) {
+            laptop(saved)?.let { base ->
+                remote(base, "", JarvisPrefs.DEFAULT_MODEL)?.let { mode = "ноутбук"; return it }
+            }
+        }
         // 3. Автономно — на телефоне
         if (LocalBrain.isReady(context)) {
             return try {

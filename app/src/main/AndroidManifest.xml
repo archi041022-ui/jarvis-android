@@ -50,6 +50,9 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".MessengerActivity" android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".JarvisService"
             android:exported="false"
