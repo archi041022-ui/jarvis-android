@@ -57,10 +57,10 @@ jobs:
           du -sh app/src/main/assets/asr
 
       - name: Сборка
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Переименование
-        run: cp app/build/outputs/apk/debug/app-debug.apk Runa.apk
+        run: cp app/build/outputs/apk/release/app-release.apk Runa.apk
 
       - uses: actions/upload-artifact@v4
         with:

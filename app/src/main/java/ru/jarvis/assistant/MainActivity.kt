@@ -55,8 +55,11 @@ class MainActivity : Activity() {
     private var greeted = false
     private val main = Handler(Looper.getMainLooper())
 
-    private val cyan = Color.parseColor("#B79CFF")       // фирменный цвет Руны
-    private val dimCyan = Color.parseColor("#4A3A7A")
+    private val backgroundColor = Color.parseColor("#091518")
+    private val panelColor = Color.parseColor("#122529")
+    private val borderColor = Color.parseColor("#375557")
+    private val accentColor = Color.parseColor("#9CE8D4")
+    private val textColor = Color.parseColor("#EFF8F5")
 
     // ───────────── Жизненный цикл ─────────────
 
@@ -120,85 +123,101 @@ class MainActivity : Activity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#0B0814"))
-            setPadding(dp(20), dp(36), dp(20), dp(20))
+            setBackgroundColor(backgroundColor)
+            setPadding(dp(20), dp(12), dp(20), dp(14))
+        }
+        root.setOnApplyWindowInsetsListener { view, insets ->
+            view.setPadding(dp(20), dp(12) + insets.systemWindowInsetTop,
+                dp(20), dp(14) + insets.systemWindowInsetBottom)
+            insets
         }
 
         val title = TextView(this).apply {
-            text = "РУНА"
-            setTextColor(cyan)
-            textSize = 28f
-            typeface = Typeface.create("sans-serif-light", Typeface.BOLD)
-            letterSpacing = 0.25f
-            gravity = Gravity.CENTER
+            text = "Руна"
+            setTextColor(textColor)
+            textSize = 34f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val header = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(title, LinearLayout.LayoutParams(0, dp(54), 1f))
+            addView(makeButton("Настройки") { showSettings() }, LinearLayout.LayoutParams(-2, dp(48)))
         }
         statusView = TextView(this).apply {
-            text = "Инициализация систем…"
-            setTextColor(Color.parseColor("#D7C9FF"))
+            text = "Запускаюсь…"
+            setTextColor(accentColor)
             textSize = 14f
             gravity = Gravity.CENTER
-            setPadding(0, dp(6), 0, dp(18))
+            setPadding(0, dp(6), 0, dp(8))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
 
         orb = TextView(this).apply {
-            text = "ГОВОРИТЕ"
-            setTextColor(cyan)
+            text = "Говорите"
+            setTextColor(accentColor)
             textSize = 16f
-            letterSpacing = 0.2f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#17112A"))
-                setStroke(dp(4), cyan)
+                cornerRadius = dp(24).toFloat()
+                setColor(panelColor)
+                setStroke(dp(1), borderColor)
             }
             setOnClickListener { if (listening) stopListening() else startListening() }
         }
         val orbBox = LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            addView(orb, LinearLayout.LayoutParams(dp(200), dp(200)))
+            addView(orb, LinearLayout.LayoutParams(-1, dp(64)))
         }
 
         logView = TextView(this).apply {
-            setTextColor(Color.parseColor("#EEE8FF"))
+            setTextColor(textColor)
             textSize = 15f
             setLineSpacing(0f, 1.15f)
         }
         scroll = ScrollView(this).apply {
             addView(logView)
-            setPadding(0, dp(18), 0, dp(12))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(20).toFloat()
+                setColor(panelColor)
+            }
+            setPadding(dp(15), dp(14), dp(15), dp(14))
         }
 
         alwaysButton = makeButton("Слушать всегда: выкл") { toggleAlways() }
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        buttons.addView(makeButton("Настройки") { showSettings() }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        buttons.addView(View(this), LinearLayout.LayoutParams(dp(10), 1))
-        buttons.addView(makeButton("Управление\nприложениями") { openAccessibility() }, LinearLayout.LayoutParams(0, dp(48), 1f))
 
-        root.addView(title)
+        root.addView(header)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(12) })
         root.addView(statusView)
         root.addView(orbBox)
-        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
-        root.addView(alwaysButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)).apply { bottomMargin = dp(10) })
-        root.addView(buttons)
+        root.addView(alwaysButton, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
+        root.addView(makeButton("Управление приложениями") { openAccessibility() },
+            LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
         setContentView(root)
+        root.requestApplyInsets()
     }
 
     private fun makeButton(label: String, onClick: () -> Unit) = Button(this).apply {
         text = label
         isAllCaps = false
         textSize = 13f
-        setTextColor(cyan)
+        setTextColor(textColor)
         background = GradientDrawable().apply {
-            cornerRadius = dp(10).toFloat()
-            setColor(Color.parseColor("#17112A"))
-            setStroke(dp(1), dimCyan)
+            cornerRadius = dp(14).toFloat()
+            setColor(panelColor)
+            setStroke(dp(1), borderColor)
         }
         setOnClickListener { onClick() }
     }
 
     private fun setOrb(label: String, active: Boolean) {
-        orb.text = label
-        (orb.background as GradientDrawable).setStroke(dp(if (active) 7 else 4), if (active) Color.WHITE else cyan)
+        orb.text = label.lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) }
+        orb.setTextColor(if (active) backgroundColor else accentColor)
+        (orb.background as GradientDrawable).apply {
+            setColor(if (active) accentColor else panelColor)
+            setStroke(dp(1), if (active) accentColor else borderColor)
+        }
     }
 
     private fun log(who: String, text: String) {
